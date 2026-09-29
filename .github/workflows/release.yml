@@ -1,0 +1,195 @@
+# Publishes one plugin as a GitHub Release.
+#
+# Three ways to start a release (all end the same way):
+#
+#   1. On the GitHub website (no terminal needed):
+#      Actions > Release plugin > Run workflow > pick the plugin > Run.
+#      The version is read from the plugin's main file, and the tag
+#      <plugin-folder>-v<version> and the release are created for you.
+#
+#   2. On the GitHub website, Releases > Draft a new release, with a new tag
+#      named <plugin-folder>-v<version> on main, then Publish. This workflow
+#      then builds the zip and adds it to that release.
+#
+#   3. From a terminal: push a tag named <plugin-folder>-v<version>.
+#
+#   Examples:  beacon-analytics-v1.17.0   mda-media-player-fit-v1.1.0
+#
+# The release gets one asset, <plugin-folder>.zip, with the plugin folder at
+# the top of the zip (what WordPress expects). Sites running the plugin see
+# the update on their next check, or right away with "Check for updates".
+#
+# Safety checks (nothing is published if any fail):
+#   - the plugin folder exists in this repo
+#   - the version is a plain number: 1.2.3 or 1.2.3.4 (no -rc1, -beta, ...)
+#   - the tag, the "Version:" line and the version constant all match
+#   - the released commit is already on the main branch
+#   - that version was not already released (for the Run workflow button)
+#   - the plugin folder holds no symbolic links
+#
+# Note: for tag pushes GitHub runs the workflow file from the tagged commit,
+# so these checks catch mistakes, not a determined insider. Who may publish
+# is controlled in the repo settings (see docs/WP-PLUGINS-GUIDE.md).
+#
+# Hardening: values reach the shell only through environment variables
+# (never pasted into the script), the checkout action is pinned to an exact
+# commit, and it keeps no git credentials on disk.
+#
+# When you add a plugin folder, add its name to the "options" list below so
+# it shows up under Run workflow.
+
+name: Release plugin
+
+on:
+  push:
+    tags:
+      - '*-v*'
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      plugin:
+        description: 'Plugin to release (its version is read from its main file)'
+        required: true
+        type: choice
+        options:
+          - beacon-analytics
+          - mda-media-player-fit
+
+permissions:
+  contents: write
+
+# One release run per plugin/tag at a time.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.plugin || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Work out the plugin and version, and check them
+        id: meta
+        shell: bash
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_PLUGIN: ${{ inputs.plugin }}
+        run: |
+          set -euo pipefail
+
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "::error::Run this from the main branch (choose 'main' in the Run workflow box)."
+              exit 1
+            fi
+            SLUG="$INPUT_PLUGIN"
+            if ! [[ "$SLUG" =~ ^[a-z0-9-]+$ ]] || [ ! -f "${SLUG}/${SLUG}.php" ]; then
+              echo "::error::'$SLUG' is not a plugin folder in this repo."
+              exit 1
+            fi
+            VERSION="$(grep -m1 -E '^[[:space:]]*\*[[:space:]]*Version:' "${SLUG}/${SLUG}.php" | sed -E 's/.*Version:[[:space:]]*//' | tr -d '[:space:]')"
+            TAG="${SLUG}-v${VERSION}"
+            if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
+              echo "::error::${TAG} is already released. Raise the version number in ${SLUG}/${SLUG}.php (and its version constant) first."
+              exit 1
+            fi
+          else
+            TAG="${GITHUB_REF_NAME}"
+            SLUG="${TAG%-v*}"
+            VERSION="${TAG##*-v}"
+          fi
+          MAIN="${SLUG}/${SLUG}.php"
+
+          if ! [[ "$SLUG" =~ ^[a-z0-9-]+$ ]]; then
+            echo "::error::'$SLUG' is not a valid plugin folder name (lowercase letters, digits, hyphens)."
+            exit 1
+          fi
+          if [ ! -f "$MAIN" ]; then
+            echo "::error::Tag '$TAG' points at '$SLUG', but $MAIN does not exist."
+            exit 1
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+            echo "::error::'$VERSION' is not a plain version number like 1.2.3 (sites only accept plain numbers)."
+            exit 1
+          fi
+
+          HEADER_VERSION="$(grep -m1 -E '^[[:space:]]*\*[[:space:]]*Version:' "$MAIN" | sed -E 's/.*Version:[[:space:]]*//' | tr -d '[:space:]')"
+          if [ "$HEADER_VERSION" != "$VERSION" ]; then
+            echo "::error::The tag says $VERSION but the Version line in $MAIN says '$HEADER_VERSION'. Make them match."
+            exit 1
+          fi
+
+          # Version constants, e.g. const BEACON_VERSION = '1.17.0'; or define( 'MDAMPF_VERSION', '1.1.0' );
+          while IFS= read -r CONST_VERSION; do
+            if [ "$CONST_VERSION" != "$VERSION" ]; then
+              echo "::error::A version constant in $MAIN says '$CONST_VERSION', but the release is $VERSION."
+              exit 1
+            fi
+          done < <(grep -E "_VERSION['\"]?[[:space:]]*(,|=)[[:space:]]*['\"][0-9]" "$MAIN" | sed -E "s/.*(,|=)[[:space:]]*['\"]([^'\"]+)['\"].*/\2/")
+
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::The commit being released is not on the main branch. Merge it to main first."
+            exit 1
+          fi
+          if [ -n "$(find "$SLUG" -type l -print -quit)" ]; then
+            echo "::error::$SLUG contains a symbolic link. Replace it with the real file."
+            exit 1
+          fi
+
+          NAME="$(grep -m1 -E '^[[:space:]]*\*[[:space:]]*Plugin Name:' "$MAIN" | sed -E 's/.*Plugin Name:[[:space:]]*//' | sed -E 's/[[:space:]]+$//')"
+          {
+            echo "tag=$TAG"
+            echo "slug=$SLUG"
+            echo "version=$VERSION"
+            echo "name=$NAME"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $NAME $VERSION as $TAG"
+
+      - name: Build the plugin zip
+        shell: bash
+        env:
+          SLUG: ${{ steps.meta.outputs.slug }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          zip -rq "dist/${SLUG}.zip" "${SLUG}" \
+            -x '*.DS_Store' '*/__MACOSX/*' '*/.git*' '*/node_modules/*' '*/tests/*' '*.bak*'
+          unzip -l "dist/${SLUG}.zip" | tail -n 3
+
+      - name: Publish the release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          SLUG: ${{ steps.meta.outputs.slug }}
+          NAME: ${{ steps.meta.outputs.name }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # The release was made on the GitHub website: add the zip if missing.
+            if gh release view "$TAG" --json assets --jq '.assets[].name' | grep -qx "${SLUG}.zip"; then
+              echo "Release $TAG already has ${SLUG}.zip. Nothing to do."
+            else
+              gh release upload "$TAG" "dist/${SLUG}.zip"
+              echo "Added ${SLUG}.zip to release $TAG."
+            fi
+          elif [ "$EVENT" = "workflow_dispatch" ]; then
+            gh release create "$TAG" "dist/${SLUG}.zip" \
+              --target "$GITHUB_SHA" \
+              --title "${NAME} ${VERSION}" \
+              --generate-notes
+          else
+            gh release create "$TAG" "dist/${SLUG}.zip" \
+              --verify-tag \
+              --title "${NAME} ${VERSION}" \
+              --generate-notes
+          fi
