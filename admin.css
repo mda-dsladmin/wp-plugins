@@ -1,0 +1,502 @@
+/*
+ * Beacon admin styles — scoped to .beacon-wrap so nothing leaks into the rest
+ * of wp-admin. Colors are declared once with light-dark(); LIGHT is the
+ * default regardless of OS setting, and the toggle button switches modes
+ * via [data-theme] (persisted in localStorage).
+ */
+
+.beacon-wrap {
+  /* Light by default regardless of the OS setting; the toggle (persisted
+     in localStorage) is the only thing that switches to dark. */
+  color-scheme: light;
+
+  /*
+   * MD Anderson brand palette. The brand red is Pantone 485 (#DA291C, the
+   * logo red) — if the comms team supplies an exact digital hex, change
+   * --brand-red and --brand-red-deep below and everything follows.
+   * Both modes are measured against WCAG 2.2 AA (4.5:1 text, 3:1 UI).
+   */
+  --brand-red:      #da291c;                      /* Pantone 485 */
+  --brand-red-deep: oklch(48% 0.185 28);          /* darker red: AA with white text */
+  --brand-red-soft: oklch(72% 0.16 25);           /* dark-mode red for bars/accents */
+
+  --bg:        light-dark(oklch(98% 0.003 60),    oklch(19% 0.008 30));
+  --card:      light-dark(#ffffff,                oklch(24.5% 0.01 30));
+  --border:    light-dark(oklch(90% 0.005 60),    oklch(35% 0.012 30));
+  --text:      light-dark(oklch(22% 0.01 30),     oklch(96% 0.003 60));
+  --muted:     light-dark(oklch(46% 0.015 30),    oklch(76% 0.01 40));
+  --accent:    light-dark(var(--brand-red-deep),  oklch(80% 0.13 25));
+  --accent-bg: light-dark(var(--brand-red-deep),  oklch(45% 0.17 28));
+  --on-accent: light-dark(#ffffff,                oklch(98% 0.003 60));
+  --bar:       light-dark(var(--brand-red),       var(--brand-red-soft));
+  --focus:     light-dark(oklch(48% 0.185 28),    oklch(80% 0.13 25));
+
+  margin-top: 0;
+  padding: 1.5rem 1.75rem 1.75rem;
+  border-top: 4px solid var(--brand-red);  /* the brand stripe */
+  border-radius: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.55;
+}
+.beacon-wrap[data-theme="light"] { color-scheme: light; }
+.beacon-wrap[data-theme="dark"]  { color-scheme: dark; }
+
+/* One strong, always-visible focus ring. Never removed. */
+.beacon-wrap :is(a, button, input, select, textarea):focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* ---- header ---- */
+.beacon-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-start;
+  justify-content: space-between;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--border);
+}
+.beacon-wrap .beacon-title {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin: 0;
+  padding: 0;
+  color: var(--text);
+  font-size: 1.4rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.beacon-title .dashicons { color: var(--accent); }
+.beacon-sub {
+  margin: 0.25rem 0 0;
+  color: var(--muted);
+}
+
+/* ---- buttons & chips ---- */
+.beacon-wrap .beacon-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.beacon-wrap .beacon-btn:hover { border-color: var(--accent); }
+/* Pressed state is conveyed by aria-pressed + the filled style (not color alone:
+   the border doubles and the label keeps its text). */
+.beacon-wrap .beacon-btn[aria-pressed="true"] {
+  border: 2px solid var(--accent);
+}
+.beacon-wrap .beacon-btn-primary,
+.beacon-wrap .beacon-btn-primary:hover {
+  min-height: unset;   /* override wp-admin's .button sizing */
+  border-color: var(--accent-bg);
+  background: var(--accent-bg);
+  color: var(--on-accent);
+  line-height: normal;
+}
+
+.beacon-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+.beacon-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  background: var(--card);
+  color: var(--text);
+  font-weight: 500;
+  text-decoration: none;
+}
+.beacon-chip:hover { border-color: var(--accent); color: var(--text); }
+/* Current range: filled + underline, so the cue is not color alone. */
+.beacon-chip.is-on {
+  border-color: var(--accent-bg);
+  background: var(--accent-bg);
+  color: var(--on-accent);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+/* ---- cards ---- */
+.beacon-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.85rem;
+  margin-bottom: 0.85rem;
+}
+.beacon-card {
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--border);
+  border-radius: 0.65rem;
+  background: var(--card);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+}
+.beacon-card + .beacon-card,
+.beacon-chart-card,
+.beacon-grid-2 { margin-bottom: 0.85rem; }
+.beacon-wrap .beacon-card h2 {
+  margin: 0 0 0.7rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.beacon-card-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.beacon-card-label .dashicons { color: var(--accent); }
+.beacon-card-num {
+  margin: 0.3rem 0 0;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- chart ---- */
+.beacon-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.4rem;
+  height: 10.5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.beacon-bars li {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.3rem;
+  margin: 0;
+  min-width: 0;
+}
+.beacon-bar {
+  width: 100%;
+  border-radius: 4px 4px 0 0;
+  background: var(--bar);
+}
+.beacon-bar-day {
+  overflow: hidden;
+  max-width: 100%;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ---- grids & tables ---- */
+.beacon-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.85rem;
+}
+.beacon-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.beacon-table th,
+.beacon-table td {
+  padding: 0.5rem 0.25rem;
+  border-top: 1px solid var(--border);
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+.beacon-table thead th {
+  border-top: 0;
+  color: var(--muted);
+  font-weight: 500;
+}
+.beacon-table .beacon-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- notices & footer ---- */
+.beacon-notice {
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent-bg);
+  border-radius: 0.5rem;
+  background: var(--card);
+}
+.beacon-wrap .beacon-notice a { color: var(--accent); }
+.beacon-muted, .beacon-foot { color: var(--muted); }
+.beacon-foot { margin-top: 1.25rem; }
+
+/* ---- settings form ---- */
+.beacon-form .beacon-card { margin-bottom: 1rem; }
+.beacon-field { margin: 0 0 1rem; }
+.beacon-field:last-child { margin-bottom: 0; }
+.beacon-field > label,
+.beacon-label {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-weight: 600;
+}
+.beacon-check {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: 24px;
+  font-weight: 500;
+}
+.beacon-wrap .beacon-input {
+  width: 100%;
+  max-width: 34rem;
+  min-height: 44px;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--card);
+  color: var(--text);
+  font-size: 14px;
+}
+.beacon-wrap .beacon-input-sm { max-width: 8rem; }
+.beacon-wrap .beacon-code { font-family: Consolas, Monaco, monospace; }
+.beacon-help {
+  margin: 0.35rem 0 0;
+  max-width: 34rem;
+  color: var(--muted);
+  font-size: 13px;
+}
+.beacon-key {
+  display: inline-block;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 0.5rem;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+/* ---- site scan ---- */
+.beacon-head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+.beacon-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 0.75rem;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+.beacon-filters label { font-weight: 600; }
+.beacon-wrap .beacon-btn-xs {
+  min-height: 32px;
+  padding: 0.2rem 0.6rem;
+  font-size: 12px;
+}
+.beacon-inline-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+.beacon-queue td { vertical-align: top; }
+.beacon-code-sm {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+}
+/* Severity badges: color + text label, never color alone. */
+.beacon-sev {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.beacon-sev-critical {
+  border-color: light-dark(oklch(55% 0.19 25), oklch(70% 0.16 25));
+  color: light-dark(oklch(45% 0.19 25), oklch(80% 0.13 25));
+}
+.beacon-sev-serious {
+  border-color: light-dark(oklch(55% 0.14 60), oklch(75% 0.13 70));
+  color: light-dark(oklch(45% 0.13 55), oklch(83% 0.12 75));
+}
+.beacon-sev-moderate {
+  border-color: var(--accent-bg);
+  color: var(--accent);
+}
+.beacon-sev-minor { color: var(--muted); }
+
+/* ---- charts ----
+   Categorical palette validated for color-vision separation and contrast
+   in BOTH modes (5 hues + gray reserved for "Other"). Sequential heat = one
+   red hue, light to dark. */
+.beacon-wrap {
+  --cat1: light-dark(#da291c, #e05535);
+  --cat2: light-dark(#2f5fa8, #5a8bd0);
+  --cat3: light-dark(#a87b00, #b5872a);
+  --cat4: light-dark(#009e77, #26a583);
+  --cat5: light-dark(#8a4dbf, #a276d1);
+  --cat-other: light-dark(#6b6b6b, #9a938f);
+  --heat0: light-dark(oklch(94% 0.003 60), oklch(30% 0.008 30));
+  --heat1: light-dark(#f2d0cb, #5a2019);
+  --heat2: light-dark(#e79b90, #8c2f21);
+  --heat3: light-dark(#dd5d4a, #c14431);
+  --heat4: light-dark(#b71b10, #f26a4b);
+}
+.beacon-chip-sm { padding: 0.5rem 0.85rem; font-size: 13px; }
+
+.beacon-linechart { display: block; width: 100%; height: auto; }
+.beacon-line { stroke: var(--bar); stroke-width: 2; stroke-linejoin: round; }
+.beacon-dot  { fill: var(--bar); stroke: var(--card); stroke-width: 2; }
+.beacon-axis { stroke: var(--border); stroke-width: 1; }
+.beacon-tick { fill: var(--muted); font-size: 11px; }
+
+.beacon-pie-wrap { display: flex; flex-wrap: wrap; gap: 1rem; align-items: center; margin-bottom: 0.75rem; }
+.beacon-pie { width: 120px; height: 120px; flex: 0 0 auto; }
+.beacon-slice { stroke: var(--card); stroke-width: 2; } /* 2px surface gap between slices */
+.beacon-pie-hole { fill: var(--card); }
+.beacon-cat-1 { fill: var(--cat1); background: var(--cat1); }
+.beacon-cat-2 { fill: var(--cat2); background: var(--cat2); }
+.beacon-cat-3 { fill: var(--cat3); background: var(--cat3); }
+.beacon-cat-4 { fill: var(--cat4); background: var(--cat4); }
+.beacon-cat-5 { fill: var(--cat5); background: var(--cat5); }
+.beacon-cat-other { fill: var(--cat-other); background: var(--cat-other); }
+.beacon-legend { flex: 1 1 12rem; margin: 0; padding: 0; list-style: none; }
+.beacon-legend li { display: flex; gap: 0.5rem; align-items: center; padding: 0.15rem 0; }
+.beacon-legend-label { flex: 1; overflow-wrap: anywhere; }
+.beacon-legend-num { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.beacon-swatch {
+  display: inline-block;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.beacon-heat-0 { fill: var(--heat0); background: var(--heat0); }
+.beacon-heat-1 { fill: var(--heat1); background: var(--heat1); }
+.beacon-heat-2 { fill: var(--heat2); background: var(--heat2); }
+.beacon-heat-3 { fill: var(--heat3); background: var(--heat3); }
+.beacon-heat-4 { fill: var(--heat4); background: var(--heat4); }
+.beacon-usmap { display: block; width: 100%; max-width: 56rem; height: auto; }
+.beacon-state { stroke: var(--card); stroke-width: 1; }
+.beacon-state:hover { stroke: var(--text); }
+.beacon-map-legend { margin: 0.5rem 0 0; color: var(--muted); }
+.beacon-map-legend .beacon-swatch { vertical-align: -2px; margin-left: 0.5rem; }
+
+/* ---- journeys ---- */
+.beacon-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.beacon-steps li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: baseline;
+  padding: 0.5rem 0.25rem;
+  border-top: 1px solid var(--border);
+}
+.beacon-steps li:first-child { border-top: 0; }
+.beacon-step-time {
+  min-width: 6.5rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.beacon-step-type {
+  padding: 0.1rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.beacon-step-event { border-color: var(--accent-bg); color: var(--accent); }
+.beacon-step-what { overflow-wrap: anywhere; }
+
+.beacon-funnel { margin-bottom: 1.25rem; }
+.beacon-funnel:last-child { margin-bottom: 0; }
+.beacon-wrap .beacon-funnel h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+.beacon-funnel-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.beacon-funnel-steps li {
+  display: grid;
+  grid-template-columns: minmax(8rem, 18rem) 1fr auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.3rem 0;
+}
+.beacon-funnel-label { overflow-wrap: anywhere; font-weight: 500; }
+.beacon-funnel-bar {
+  display: block;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--bar);
+}
+.beacon-funnel-num {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* ---- print: the "Save as PDF" report ---- */
+@media print {
+  #adminmenumain, #wpadminbar, #wpfooter, #screen-meta, #screen-meta-links,
+  .notice, .beacon-head-actions, .beacon-ranges, .beacon-filters,
+  .beacon-inline-form, #beacon-theme, #beacon-print { display: none !important; }
+  #wpcontent, #wpbody-content { margin: 0 !important; padding: 0 !important; }
+  .beacon-wrap {
+    color-scheme: light;
+    margin: 0;
+    padding: 0;
+    background: #fff;
+    color: #000;
+  }
+  .beacon-wrap[data-theme="dark"] { color-scheme: light; }
+  .beacon-card { break-inside: avoid; box-shadow: none; }
+  .beacon-wrap a { text-decoration: none; color: #000; }
+}
+
+/* Motion: none used beyond hovers, and any future transition respects this. */
+@media (prefers-reduced-motion: reduce) {
+  .beacon-wrap *,
+  .beacon-wrap *::before,
+  .beacon-wrap *::after {
+    animation-duration: 0.001ms !important;
+    transition-duration: 0.001ms !important;
+  }
+}
