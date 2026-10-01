@@ -4,11 +4,8 @@
  * already filled in, so the browser only ever talks to your own collector.
  *
  * It sends only non-identifying page data. No IP is sent by JS (the server
- * sees it, hashes it for the daily visitor count, and discards it). The page
- * URL is sent with its query string so the server can keep the few keys the
- * admin allow-listed; the server drops everything else before storing. The
- * page title comes from the server (data-title), so search and error pages
- * never send the visitor's search terms.
+ * sees it, hashes it for the daily visitor count, and discards it). No query
+ * strings leave the browser.
  */
 (function () {
   'use strict';
@@ -82,22 +79,14 @@
       .catch(function () {});
   }
 
-  // Path plus query. On search pages the server prints a generic path
-  // (data-path) so the visitor's search words are never sent at all. The
-  // collector strips the whole query except the keys the admin allow-listed.
-  function pagePath() {
-    var dp = script.getAttribute('data-path');
-    return dp ? dp : location.pathname + location.search;
-  }
-
   function pageview() {
     var nav = performance.getEntriesByType('navigation')[0];
     send({
       type: 'pageview',
-      url: pagePath(),
-      // Server-chosen title (generic on search and 404 pages); the server
-      // checks it again before storing.
-      title: script.hasAttribute('data-title') ? script.getAttribute('data-title') : document.title,
+      // Path plus query. The collector strips the whole query except the keys
+      // the admin allow-listed in settings, before anything is stored.
+      url: location.pathname + location.search,
+      title: document.title,
       ref: document.referrer || '',
       sb: sb,
       bv: bv,
@@ -145,7 +134,7 @@
 
   // Public API for custom events: window.beacon('signup_click', 'optional label')
   window.beacon = function (name, label) {
-    var p = { type: 'event', name: String(name).slice(0, 120), url: pagePath() };
+    var p = { type: 'event', name: String(name).slice(0, 120), url: location.pathname + location.search };
     if (label) p.label = String(label).slice(0, 140);
     send(p);
   };
@@ -159,7 +148,7 @@
       var u = new URL(a.href);
       if (u.host && u.host !== location.host) {
         send({ type: 'outbound', name: u.host, label: labelFor(a),
-               url: pagePath() });
+               url: location.pathname + location.search });
       }
     } catch (_) {}
   }, true);
@@ -184,7 +173,7 @@
         if (!/^[A-Za-z0-9_-]{1,32}$/.test(v)) return; // not code-shaped: refuse
         studySent = true;
         send({ type: 'event', name: 'study_code', label: v,
-               url: pagePath() });
+               url: location.pathname + location.search });
       } catch (_) {}
     }, true);
   }
@@ -426,10 +415,7 @@
         if (!q) q = clean2(el.name) || idL;
 
         var ans;
-        // Same age rule the server enforces (it caps again regardless).
-        // Field names count too: "patient_age" and "birthYear" become words.
-        var words = (q + ' ' + idL).replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[_\-.\/]+/g, ' ');
-        var isAge = /(^|[^a-z\u00C0-\u024F])(age|ages|how old|years? old|dob|date of birth|birth ?year|born|edad|cu[a\u00E1]ntos a[n\u00F1]os|a[n\u00F1]os|nacimiento|naci[o\u00F3]?)(?![a-z\u00C0-\u024F])/i.test(words);
+        var isAge = /\bage\b|\byears? old\b|\bdob\b/i.test(q + ' ' + idL);
         if (isAge && v >= 90) {
           ans = '90+'; // non-negotiable Safe Harbor cap
         } else if (rule.width > 0) {

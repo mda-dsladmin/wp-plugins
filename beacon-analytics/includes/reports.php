@@ -94,13 +94,13 @@ function beacon_report_sections(string $range, array $content): array
     ];
 
     if (in_array('analytics', $content, true)) {
-        $d = beacon_get_summary($range);
+        $d = beacon_get_summary($range, 200); // deep tables: nothing falls below a top-10 cut
         $sections[] = ['title' => __('Totals', 'beacon-analytics'),
             'headers' => [__('Pageviews', 'beacon-analytics'), __('Unique visitors', 'beacon-analytics'), __('Sessions', 'beacon-analytics')],
             'rows' => [[(int) $d['totals']['pageviews'], (int) $d['totals']['visitors'], (int) $d['totals']['sessions']]]];
         $sections[] = ['title' => __('Pageviews by day', 'beacon-analytics'),
             'headers' => [__('Day', 'beacon-analytics'), __('Views', 'beacon-analytics')],
-            'rows' => array_map(function ($r) { return [$r['day'], (int) $r['views']]; }, $d['series'])];
+            'rows' => array_map(fn($r) => [$r['day'], (int) $r['views']], $d['series'])];
         $simple = [
             [__('Top pages', 'beacon-analytics'),    __('Path', 'beacon-analytics'),    __('Views', 'beacon-analytics'),    $d['top_pages']],
             [__('Entry pages', 'beacon-analytics'),  __('Path', 'beacon-analytics'),    __('Sessions', 'beacon-analytics'), $d['entries']],
@@ -112,9 +112,9 @@ function beacon_report_sections(string $range, array $content): array
             [__('Screen sizes', 'beacon-analytics'), __('Size', 'beacon-analytics'),    __('Views', 'beacon-analytics'),    $d['screens']],
             [__('Exit URLs (outbound clicks)', 'beacon-analytics'), __('Destination', 'beacon-analytics'), __('Clicks', 'beacon-analytics'), $d['exit_urls']],
         ];
-        foreach ($simple as list($title, $h1, $h2, $rows)) {
+        foreach ($simple as [$title, $h1, $h2, $rows]) {
             $sections[] = ['title' => $title, 'headers' => [$h1, $h2],
-                'rows' => array_map('array_values', array_map(function ($r) { return array_slice($r, 0, 2); }, $rows))];
+                'rows' => array_map('array_values', array_map(fn($r) => array_slice($r, 0, 2), $rows))];
         }
         if ($d['countries']) {
             $sections[] = ['title' => __('Countries', 'beacon-analytics'),
@@ -130,10 +130,7 @@ function beacon_report_sections(string $range, array $content): array
                 'rows' => [[(int) $d['avg_load']]]];
         }
         $t = beacon_table();
-        // Survey answers are what visitors chose on the site's own
-        // questions. They stay on the dashboard; emailed reports carry them
-        // only when an admin turned "Include survey answers" on.
-        $survey = empty(beacon_settings()['report_include_survey']) ? [] : $wpdb->get_results($wpdb->prepare(
+        $survey = $wpdb->get_results($wpdb->prepare(
             "SELECT event_label, COUNT(*) AS responses
              FROM {$t}
              WHERE event_name = 'survey_response' AND event_label IS NOT NULL AND created_at >= %s
@@ -182,7 +179,103 @@ function beacon_report_sections(string $range, array $content): array
         }
     }
 
+    if (in_array('journeys', $content, true)) {
+        foreach (beacon_report_journey_sections($range) as $js) {
+            $sections[] = $js;
+        }
+    }
+
     return $sections;
+}
+
+/**
+ * Journeys for exports: a sessions table, and the ordered steps of the
+ * most recent sessions. Sessions are identified by a short prefix of the
+ * anonymous session code so the two tables can be matched up. Bounded so
+ * a busy site cannot produce an unreadable file.
+ */
+function beacon_report_journey_sections(string $range): array
+{
+    require_once BEACON_DIR . 'includes/stats.php';
+
+    $study_on = beacon_settings()['study_field'] !== '';
+    $sessions = beacon_get_sessions($range, '', 1, 200);
+    $out      = [];
+
+    $head = [__('Started', 'beacon-analytics'), __('Session', 'beacon-analytics')];
+    if ($study_on) {
+        $head[] = __('Study code', 'beacon-analytics');
+    }
+    array_push($head, __('Pages', 'beacon-analytics'), __('Events', 'beacon-analytics'),
+        __('Length (s)', 'beacon-analytics'), __('Entry page', 'beacon-analytics'));
+
+    $rows = [];
+    foreach ($sessions as $s) {
+        $row = [
+            get_date_from_gmt((string) $s['started'], 'Y-m-d H:i'),
+            substr((string) $s['session_id'], 0, 6),
+        ];
+        if ($study_on) {
+            $row[] = (string) ($s['study_code'] ?? '');
+        }
+        array_push($row, (int) $s['pageviews'], (int) $s['events'],
+            max(0, strtotime((string) $s['ended']) - strtotime((string) $s['started'])),
+            (string) $s['entry_path']);
+        $rows[] = $row;
+    }
+    $out[] = ['title' => __('Journeys: sessions (most recent 200)', 'beacon-analytics'),
+        'headers' => $head, 'rows' => $rows];
+
+    // Step-by-step detail for the most recent sessions.
+    $ids   = array_column(array_slice($sessions, 0, 50), 'session_id');
+    $steps = beacon_get_steps_for_sessions($ids);
+
+    // Time on page per pageview: gap to the next pageview IN THE SAME
+    // session. The last page of a session has no next, so it stays blank —
+    // that time is unknowable, not zero.
+    $durs = [];
+    foreach ($steps as $i => $st) {
+        if ($st['event_type'] !== 'pageview') {
+            continue;
+        }
+        for ($j = $i + 1, $cnt = count($steps); $j < $cnt; $j++) {
+            if ($steps[$j]['session_id'] !== $st['session_id']) {
+                break; // steps are ordered by session, then time
+            }
+            if ($steps[$j]['event_type'] === 'pageview') {
+                $durs[$i] = max(0, strtotime((string) $steps[$j]['created_at'])
+                    - strtotime((string) $st['created_at']));
+                break;
+            }
+        }
+    }
+
+    $rows = [];
+    $n    = [];
+    foreach ($steps as $i => $st) {
+        $sid = (string) $st['session_id'];
+        $n[$sid] = ($n[$sid] ?? 0) + 1;
+        if ($st['event_type'] === 'pageview') {
+            $what = (string) $st['path'];
+        } else {
+            $what = (string) ($st['event_name'] ?? $st['event_type']);
+            if (!empty($st['event_label'])) {
+                $what .= ' — ' . $st['event_label'];
+            }
+        }
+        $rows[] = [substr($sid, 0, 6), $n[$sid],
+            get_date_from_gmt((string) $st['created_at'], 'H:i:s'),
+            $st['event_type'] === 'pageview' ? __('page', 'beacon-analytics') : (string) $st['event_type'],
+            isset($durs[$i]) ? $durs[$i] : '',
+            $what];
+    }
+    $out[] = ['title' => __('Journeys: steps (most recent 50 sessions)', 'beacon-analytics'),
+        'headers' => [__('Session', 'beacon-analytics'), __('#', 'beacon-analytics'),
+            __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'),
+            __('On page (s)', 'beacon-analytics'), __('Step', 'beacon-analytics')],
+        'rows' => $rows];
+
+    return $out;
 }
 
 // ---------------------------------------------------------------- CSV ----
@@ -208,14 +301,14 @@ function beacon_report_write_csv(array $sections, string $path): bool
     }
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
     foreach ($sections as $s) {
-        beacon_fputcsv($out, [beacon_report_csv_cell((string) $s['title'])]);
+        fputcsv($out, [beacon_report_csv_cell((string) $s['title'])], ',', '"', '');
         if ($s['headers']) {
-            beacon_fputcsv($out, array_map('beacon_report_csv_cell', array_map('strval', $s['headers'])));
+            fputcsv($out, array_map('beacon_report_csv_cell', array_map('strval', $s['headers'])), ',', '"', '');
         }
         foreach ($s['rows'] as $r) {
-            beacon_fputcsv($out, array_map('beacon_report_csv_cell', array_map('strval', array_values($r))));
+            fputcsv($out, array_map('beacon_report_csv_cell', array_map('strval', array_values($r))), ',', '"', '');
         }
-        beacon_fputcsv($out, []);
+        fputcsv($out, [], ',', '"', '');
     }
     return fclose($out);
 }
@@ -370,7 +463,7 @@ function beacon_report_write_pdf(array $sections, string $path, string $title): 
     $ops   = '';
     $y     = $H - $MARGIN;
 
-    $newpage = function () use (&$pages, &$ops, &$y, $H, $MARGIN) {
+    $newpage = function () use (&$pages, &$ops, &$y, $H, $MARGIN): void {
         if ($ops !== '') {
             $pages[] = $ops;
         }
@@ -378,13 +471,13 @@ function beacon_report_write_pdf(array $sections, string $path, string $title): 
         $y   = $H - $MARGIN;
     };
     // font: 1 = regular, 2 = bold; color: k = black, r = brand red
-    $line = function (array $cells, array $xw, float $size, int $font, string $color) use (&$ops, &$y, $MARGIN, $newpage) {
+    $line = function (array $cells, array $xw, float $size, int $font, string $color) use (&$ops, &$y, $MARGIN, $newpage): void {
         if ($y < $MARGIN + $size) {
             $newpage();
         }
         $rgb = $color === 'r' ? '0.855 0.161 0.110' : '0.133 0.133 0.133';
         foreach ($cells as $i => $cell) {
-            list($x, $w) = $xw[$i];
+            [$x, $w] = $xw[$i];
             $max  = max(3, (int) floor($w / ($size * 0.52))); // approx Helvetica fit
             $text = (string) $cell;
             if (mb_strlen($text) > $max) {
@@ -483,7 +576,7 @@ function beacon_report_write_pdf(array $sections, string $path, string $title): 
 function beacon_send_report(int $days, string $reason): bool
 {
     $o       = beacon_settings();
-    $content = array_values(array_intersect(explode(',', (string) $o['report_content']), ['analytics', 'scan', 'funnels']));
+    $content = array_values(array_intersect(explode(',', (string) $o['report_content']), ['analytics', 'scan', 'funnels', 'journeys']));
     if (!$content) {
         $content = ['analytics'];
     }
@@ -499,20 +592,9 @@ function beacon_send_report(int $days, string $reason): bool
     // CSV (which Excel opens fine) if the host lacks it.
     $format = (string) $o['report_format'];
     $stamp  = wp_date('Y-m-d');
-    // wp_tempnam() makes a unique, unpredictable file in the temp folder; the
-    // attachment is written next to it, readable by the owner only, and both
-    // are deleted when this function ends, even on failure.
-    if (!function_exists('wp_tempnam')) {
-        require_once ABSPATH . 'wp-admin/includes/file.php';
-    }
-    // Files created from here on are readable by the owner only, from the
-    // first byte (not just after a chmod), so other accounts on a shared
-    // server never get a window to read them.
-    $old_umask = umask(0077);
-    $base   = wp_tempnam('beacon-report-' . $stamp);
+    $base   = trailingslashit(get_temp_dir()) . 'beacon-report-' . $stamp . '-' . wp_generate_password(8, false);
     $ok     = false;
     $file   = '';
-    try {
     if ($format === 'pdf') {
         $file = $base . '.pdf';
         $ok   = beacon_report_write_pdf($sections, $file, sprintf('Beacon Analytics — %s', wp_parse_url(home_url(), PHP_URL_HOST) ?: 'report'));
@@ -520,24 +602,20 @@ function beacon_send_report(int $days, string $reason): bool
         $file = $base . '.xlsx';
         $ok   = beacon_report_write_xlsx($sections, $file);
     }
-    $fell_back = false;
     if (!$ok) { // csv chosen, or the fancier format failed
-        $fell_back = in_array($format, ['xlsx', 'pdf'], true);
         $file = $base . '.csv';
         $ok   = beacon_report_write_csv($sections, $file);
     }
-    umask($old_umask); // back to normal before anything else runs (wp_mail, other plugins)
     if (!$ok) {
         return false;
     }
-    @chmod($file, 0600);
 
     // Short summary for the email body; the attachment has everything.
     $host   = wp_parse_url(home_url(), PHP_URL_HOST) ?: home_url();
     $tot    = ['pageviews' => null, 'visitors' => null, 'sessions' => null];
     foreach ($sections as $s) {
         if (count($s['headers']) === 3 && count($s['rows']) === 1 && is_int($s['rows'][0][0] ?? null)) {
-            list($tot['pageviews'], $tot['visitors'], $tot['sessions']) = $s['rows'][0];
+            [$tot['pageviews'], $tot['visitors'], $tot['sessions']] = $s['rows'][0];
             break;
         }
     }
@@ -550,32 +628,18 @@ function beacon_send_report(int $days, string $reason): bool
                . number_format_i18n($tot['visitors']) . '</strong> visitors &middot; <strong>'
                . number_format_i18n($tot['sessions']) . '</strong> sessions</p>';
     }
-    $body .= '<p>The full report is attached (' . esc_html(strtoupper(pathinfo($file, PATHINFO_EXTENSION))) . ').';
-    if ($fell_back) {
-        $body .= ' It was sent as CSV because this server cannot build the chosen format.';
-    }
-    $body .= ' It holds de-identified totals from the dashboard: no names, email addresses, IP addresses, or visitor IDs.';
-    if (in_array('analytics', $content, true) && !empty($o['report_include_survey'])) {
-        $body .= ' It also includes survey answers (each question and the answer visitors chose), because "Include survey answers" is on in Beacon Settings.';
-    }
-    $body .= '</p>';
+    $body .= '<p>The full report is attached (' . esc_html(strtoupper(pathinfo($file, PATHINFO_EXTENSION))) . '). '
+           . 'It holds the same de-identified totals as the dashboard &mdash; no personal data.</p>';
     $body .= '<p style="color:#767676;font-size:12px">Sent automatically by the Beacon Analytics plugin on '
            . esc_html($host) . '. Change schedule, content, or recipients in Beacon &rarr; Settings.</p></div>';
 
     $sent = wp_mail($to, $subject, $body, ['Content-Type: text/html; charset=UTF-8'], [$file]);
+    @unlink($file);
     return (bool) $sent;
-    } finally {
-        umask($old_umask);
-        foreach ([$file, $base, $base . '.pdf', $base . '.xlsx', $base . '.csv'] as $tmp) {
-            if (is_string($tmp) && $tmp !== '' && file_exists($tmp)) {
-                @unlink($tmp);
-            }
-        }
-    }
 }
 
 // The scheduler: twice a day, send whichever selected intervals are due.
-add_action('beacon_email_tick', function () {
+add_action('beacon_email_tick', function (): void {
     $o        = beacon_settings();
     $selected = array_intersect(explode(',', (string) $o['report_intervals']), array_keys(beacon_report_intervals()));
     if (!$selected) {
@@ -586,7 +650,7 @@ add_action('beacon_email_tick', function () {
     $now   = time();
     $dirty = false;
     foreach ($selected as $key) {
-        list($days, $label) = beacon_report_intervals()[$key];
+        [$days, $label] = beacon_report_intervals()[$key];
         if (empty($last[$key])) {
             // Just switched on: start the clock so the first report covers
             // one full period instead of a partial one.
@@ -609,7 +673,7 @@ add_action('beacon_email_tick', function () {
 });
 
 // "Send a test report now" button on the settings screen.
-add_action('admin_post_beacon_send_test_report', function () {
+add_action('admin_post_beacon_send_test_report', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }

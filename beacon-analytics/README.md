@@ -186,30 +186,14 @@ minutes. Data lives in the site's own MySQL database in tables prefixed
 
 ## Updates
 
-The plugin updates itself like any other WordPress plugin, from GitHub
-Releases in github.com/mda-dsladmin/wp-plugins (declared in the plugin
-header's Update URI line, so wordpress.org is never asked). WordPress shows
-the normal one-click update on the Plugins screen when a newer release
-exists, and auto-updates work too. Checks are cached for 12 hours; "Check
-for updates" under the plugin on the Plugins screen, or Dashboard > Updates
-> "Check again", checks right away.
-
-Downloads are accepted only from that repo's release downloads, only for
-plain version numbers (1.2.3), and the API request never follows redirects.
-No token is needed (the repo is public); on busy shared hosting, add
-`define('MDA_WP_PLUGINS_GITHUB_TOKEN', 'github_pat_...');` to wp-config.php
-to raise GitHub's rate limit. A failed check (rate limit, outage) keeps
-the last known result, so a pending update does not disappear. Publishing
-a release = bump the version, merge to main, then on GitHub run Actions >
-Release plugin > Run workflow and pick Beacon (see the repo's README and
-docs/WP-PLUGINS-GUIDE.md).
-
-Sites running 1.16.0 or older need 1.17.0 installed once by hand (Plugins >
-Add New > Upload Plugin, then "Replace current with uploaded"). From then on
-they update from GitHub. To install updates without clicking, turn on
-"Enable auto-updates" for Beacon on the Plugins screen. The server must be
-able to reach api.github.com, github.com and
-release-assets.githubusercontent.com over HTTPS.
+The plugin updates itself like any other WordPress plugin. It checks
+`https://envsnstudios.com/plugins/` (declared in the plugin header's
+Update URI line) for a newer release zip, and shows the normal one-click
+update in the Plugins screen when one exists. Downloads are only accepted
+over HTTPS from that exact host. Checks are cached for 6 hours;
+Dashboard > Updates > "Check again" forces a fresh check. Publishing a
+release = dropping the new zip into that folder on the server (see
+update-server/HOW-TO-SET-UP-UPDATES.md in the project files).
 
 ## Email reports
 
@@ -217,7 +201,7 @@ Beacon can email a report on a schedule — weekly up to yearly, several
 schedules at once (every 2 weeks AND every quarter, for example). Set it
 up in Beacon > Settings > Email reports: recipients (blank = the site
 admin email; comma-separate several addresses), what to include
-(analytics, site scan findings, funnels), and the attachment format
+(analytics, site scan findings, funnels, journeys), and the attachment format
 (Excel, PDF, or CSV). The email body shows the key totals; the
 attachment carries every table. Files are generated on this server with
 no outside service. Reports hold the same de-identified aggregates as

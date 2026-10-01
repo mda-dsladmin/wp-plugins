@@ -55,7 +55,7 @@ function beacon_parse_number_overrides(string $text): array
         if (count($parts) < 2) {
             continue;
         }
-        list($field, $width_raw) = $parts;
+        [$field, $width_raw] = $parts;
         // The leading # is the documented format, but be forgiving: accept
         // the bare id too rather than silently dropping the rule.
         if (str_starts_with($field, '#')) {
@@ -96,7 +96,7 @@ function beacon_parse_tags(string $text): array
         if (count($parts) < 3) {
             continue; // not a complete rule
         }
-        list($trigger, $val, $event) = $parts;
+        [$trigger, $val, $event] = $parts;
 
         $trigger = strtolower($trigger);
         // Event name is used as a key: letters, numbers, underscore only.

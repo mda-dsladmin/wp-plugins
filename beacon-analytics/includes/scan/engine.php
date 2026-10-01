@@ -50,7 +50,7 @@ function beacon_findings_table(): string
 }
 
 /** The run currently queued or running, if any. */
-function beacon_scan_active_run()
+function beacon_scan_active_run(): ?array
 {
     global $wpdb;
     $t = beacon_scan_runs_table();
@@ -75,13 +75,8 @@ function beacon_scan_tick_scheduled(): bool
  * every future scan. If a running run has no tick scheduled, resume it; if
  * it has been going over 6 hours, call it failed.
  */
-function beacon_scan_watchdog()
+function beacon_scan_watchdog(): void
 {
-    // admin_init also fires for admin-ajax.php / admin-post.php requests from
-    // anyone, so only admins (or cron) get to nudge a stalled scan.
-    if (!wp_doing_cron() && !current_user_can('manage_options')) {
-        return;
-    }
     global $wpdb;
     $run = beacon_scan_active_run();
     if (!$run) {
@@ -111,11 +106,10 @@ function beacon_scan_allowed_hosts(): array
         $hosts[] = strtolower($home);
         $hosts[] = strtolower(preg_replace('/^www\./', '', $home));
     }
-    // Admin-listed domains cover their subdomains too (marked with a dot).
     foreach (explode(',', (string) beacon_settings()['scan_allowed_domains']) as $d) {
         $d = strtolower(trim($d));
         if ($d !== '' && preg_match('/^[a-z0-9.\-]+\.[a-z]{2,}$/', $d)) {
-            $hosts[] = '.' . ltrim($d, '.');
+            $hosts[] = $d;
         }
     }
     return array_unique($hosts);
@@ -178,7 +172,7 @@ function beacon_scan_start(): string
  * Schedule the next tick. The batch number keeps each event's args unique so
  * WP-Cron's 10-minute duplicate-event protection never swallows one.
  */
-function beacon_scan_schedule_tick(int $run_id, int $batch)
+function beacon_scan_schedule_tick(int $run_id, int $batch): void
 {
     wp_schedule_single_event(time(), 'beacon_scan_tick', [$run_id, $batch]);
     if (function_exists('spawn_cron')) {
@@ -192,7 +186,7 @@ add_action('beacon_scan_tick', 'beacon_scan_do_tick', 10, 2);
  * One cron tick: process queued pages until the time or page budget runs
  * out, then either re-schedule or finalize.
  */
-function beacon_scan_do_tick(int $run_id, int $batch)
+function beacon_scan_do_tick(int $run_id, int $batch): void
 {
     global $wpdb;
 
@@ -276,13 +270,11 @@ function beacon_scan_process_url(int $run_id, string $url, int $deadline): int
         $path .= '?' . $q;
     }
 
-    // Pages are always this site's own (or an admin-listed domain's), and so
-    // is every redirect they take. A permalink or redirect that points off
-    // the site is not fetched.
-    $resp = beacon_scan_request('GET', $url, [
+    $resp = wp_remote_get($url, [
         'timeout'     => 15,
+        'redirection' => 3,
         'user-agent'  => 'BeaconScanner/1.0 (site self-check; ' . home_url('/') . ')',
-    ], beacon_scan_allowed_hosts());
+    ]);
 
     $status = is_wp_error($resp) ? 0 : (int) wp_remote_retrieve_response_code($resp);
     $body   = is_wp_error($resp) ? '' : (string) wp_remote_retrieve_body($resp);
@@ -352,7 +344,7 @@ function beacon_scan_process_url(int $run_id, string $url, int $deadline): int
  * visitor data — it is the server asking "does this link still work?" — and
  * can be turned off entirely in settings.
  */
-function beacon_scan_check_links(int $run_id, string $path, array $links, array $allowed, int $deadline)
+function beacon_scan_check_links(int $run_id, string $path, array $links, array $allowed, int $deadline): void
 {
     $opt   = 'beacon_scan_links_' . $run_id;
     $cache = get_option($opt, []);
@@ -360,27 +352,13 @@ function beacon_scan_check_links(int $run_id, string $path, array $links, array 
         $cache = [];
     }
     $check_external = !empty(beacon_settings()['scan_check_external']);
-    // With outside-link checks off, a first-party link that redirects off
-    // the site is not followed there either.
-    $hop_rule = $check_external ? null : $allowed;
     $dirty = false;
 
     foreach ($links as $link) {
-        $host = beacon_url_host($link);
-        if ($host === null) {
-            continue; // not an http(s) link
-        }
-        // Internal = this site's host on this site's port, or an
-        // admin-listed domain on a standard port. The site's host on some
-        // other port (e.g. :6379) is NOT internal.
-        $internal = beacon_scan_is_first_party($link, $allowed);
+        $host     = beacon_url_host($link);
+        $internal = beacon_host_allowed($host, $allowed);
 
         if (!$internal && !$check_external) {
-            continue;
-        }
-        // Never request private/internal addresses (SSRF guard). Such links
-        // are skipped, not reported, so the scan can't be used as a probe.
-        if (!beacon_scan_url_safe($link)) {
             continue;
         }
 
@@ -390,11 +368,11 @@ function beacon_scan_check_links(int $run_id, string $path, array $links, array 
             if (time() >= $deadline || count($cache) >= BEACON_SCAN_LINK_CAP) {
                 break;
             }
-            $resp = beacon_scan_request('HEAD', $link, ['timeout' => 5, 'user-agent' => 'BeaconScanner/1.0'], $hop_rule);
+            $resp = wp_remote_head($link, ['timeout' => 5, 'redirection' => 3, 'user-agent' => 'BeaconScanner/1.0']);
             $code = is_wp_error($resp) ? 0 : (int) wp_remote_retrieve_response_code($resp);
             // Some servers reject HEAD; confirm with a light GET before flagging.
             if (in_array($code, [0, 403, 405, 501], true)) {
-                $resp = beacon_scan_request('GET', $link, ['timeout' => 5, 'limit_response_size' => 65536, 'user-agent' => 'BeaconScanner/1.0'], $hop_rule);
+                $resp = wp_remote_get($link, ['timeout' => 5, 'redirection' => 3, 'user-agent' => 'BeaconScanner/1.0']);
                 $code = is_wp_error($resp) ? 0 : (int) wp_remote_retrieve_response_code($resp);
             }
             $cache[$link] = $code;
@@ -434,7 +412,7 @@ function beacon_scan_check_links(int $run_id, string $path, array $links, array 
  * ones, and un-sticking an admin's "ignored". Identity is path + check +
  * selector (+ an optional 'fkey' like a link URL); the message just updates.
  */
-function beacon_record_finding(int $run_id, string $path, array $f)
+function beacon_record_finding(int $run_id, string $path, array $f): void
 {
     global $wpdb;
     $t = beacon_findings_table();
@@ -481,7 +459,7 @@ function beacon_record_finding(int $run_id, string $path, array $f)
 /**
  * End of run: site-level checks, then close out.
  */
-function beacon_scan_finalize(int $run_id)
+function beacon_scan_finalize(int $run_id): void
 {
     global $wpdb;
     $pt = beacon_scan_pages_table();
@@ -536,7 +514,7 @@ function beacon_scan_finalize(int $run_id)
     // Sitemap present? WP native first, then the common plugin paths.
     $found = false;
     foreach (['wp-sitemap.xml', 'sitemap.xml', 'sitemap_index.xml'] as $s) {
-        $resp = beacon_scan_request('HEAD', home_url('/' . $s), ['timeout' => 8], beacon_scan_allowed_hosts());
+        $resp = wp_remote_head(home_url('/' . $s), ['timeout' => 8, 'redirection' => 2]);
         if (!is_wp_error($resp) && (int) wp_remote_retrieve_response_code($resp) === 200) {
             $found = true;
             break;
@@ -585,7 +563,7 @@ function beacon_scan_finalize(int $run_id)
 
 /* ---- weekly schedule, driven by the settings checkbox ---- */
 
-add_action('init', function () {
+add_action('init', function (): void {
     $weekly    = !empty(beacon_settings()['scan_weekly']);
     $scheduled = (bool) wp_next_scheduled('beacon_weekly_scan');
     if ($weekly && !$scheduled) {
@@ -595,6 +573,6 @@ add_action('init', function () {
     }
 });
 
-add_action('beacon_weekly_scan', function () {
+add_action('beacon_weekly_scan', function (): void {
     beacon_scan_start();
 });

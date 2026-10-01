@@ -35,7 +35,7 @@ function beacon_csv_start(string $filename)
  * label starting with = + - @ via the public collector, and Excel would run
  * it as a formula when the manager opens the export. Prefix those with '.
  */
-function beacon_csv_row($out, array $row)
+function beacon_csv_row($out, array $row): void
 {
     $safe = [];
     foreach (array_values($row) as $v) {
@@ -45,11 +45,11 @@ function beacon_csv_row($out, array $row)
         }
         $safe[] = $v;
     }
-    beacon_fputcsv($out, $safe); // RFC 4180 quoting, no backslash escapes, same on PHP 7 and 8
+    fputcsv($out, $safe, ',', '"', ''); // explicit args: PHP 8.4 deprecation + no \ escapes
 }
 
 /** One titled section of rows into the stream. */
-function beacon_csv_section($out, string $title, array $header, array $rows)
+function beacon_csv_section($out, string $title, array $header, array $rows): void
 {
     beacon_csv_row($out, [$title]);
     beacon_csv_row($out, $header);
@@ -59,7 +59,7 @@ function beacon_csv_section($out, string $title, array $header, array $rows)
     beacon_csv_row($out, []); // blank spacer line
 }
 
-add_action('admin_post_beacon_export_csv', function () {
+add_action('admin_post_beacon_export_csv', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }
@@ -69,7 +69,7 @@ add_action('admin_post_beacon_export_csv', function () {
     if (!in_array($range, ['1d', '7d', '30d', '90d'], true)) {
         $range = '7d';
     }
-    $d = beacon_get_summary($range);
+    $d = beacon_get_summary($range, 200); // export depth: include quiet pages, not just the top 10
 
     $out = beacon_csv_start('beacon-analytics-' . $range . '-' . wp_date('Y-m-d') . '.csv');
 
@@ -128,11 +128,18 @@ add_action('admin_post_beacon_export_csv', function () {
         beacon_csv_section($out, 'Funnel: ' . $f['name'], ['Step', 'Sessions reaching it'], $rows);
     }
 
+    // Journeys: same bounded tables the emailed reports carry.
+    require_once BEACON_DIR . 'includes/reports.php';
+    foreach (beacon_report_journey_sections($range) as $js) {
+        beacon_csv_section($out, (string) $js['title'], array_map('strval', $js['headers']),
+            array_map(static fn($r2) => array_map('strval', array_values($r2)), $js['rows']));
+    }
+
     fclose($out);
     exit;
 });
 
-add_action('admin_post_beacon_export_findings', function () {
+add_action('admin_post_beacon_export_findings', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }

@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-function beacon_render_dashboard()
+function beacon_render_dashboard(): void
 {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('You do not have permission to view this page.', 'beacon-analytics'));
@@ -120,7 +120,7 @@ function beacon_render_dashboard()
         if ($data['avg_load'] > 0) {
             $cards[] = [__('Avg page load (ms)', 'beacon-analytics'), (int) $data['avg_load'], 'performance'];
         }
-        foreach ($cards as list($label, $val, $icon)) : ?>
+        foreach ($cards as [$label, $val, $icon]) : ?>
           <div class="beacon-card">
             <p class="beacon-card-label">
               <span class="dashicons dashicons-<?php echo esc_attr($icon); ?>" aria-hidden="true"></span>
@@ -306,7 +306,7 @@ function beacon_render_dashboard()
  *
  * @param array<int,array> $rows
  */
-function beacon_dash_table(string $title, string $col, array $rows, string $key, string $count_key, string $count_label = '', bool $pie = false)
+function beacon_dash_table(string $title, string $col, array $rows, string $key, string $count_key, string $count_label = '', bool $pie = false): void
 {
     $count_label = $count_label !== '' ? $count_label : __('Views', 'beacon-analytics');
     ?>

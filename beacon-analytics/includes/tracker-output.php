@@ -40,16 +40,12 @@ add_filter('wp_content_img_tag', function ($img) {
  * accessibility fix, not analytics. A real visible h1 is still the proper
  * fix; the Site Scan keeps reporting the finding either way as a reminder.
  */
-add_action('wp_footer', function () {
+add_action('wp_footer', function (): void {
     if (empty(beacon_settings()['fix_missing_h1'])) {
         return;
     }
     $title = is_singular() ? get_the_title() : wp_get_document_title();
-    // Both come back HTML-escaped ("Mom&#8217;s &amp; Dad&#8217;s"); the
-    // heading is set as plain text, so decode first or screen readers would
-    // read the entity codes out loud.
-    $title = is_string($title) ? html_entity_decode(wp_strip_all_tags($title), ENT_QUOTES, 'UTF-8') : '';
-    if (trim($title) === '') {
+    if (!is_string($title) || trim($title) === '') {
         return;
     }
     ?>
@@ -57,7 +53,7 @@ add_action('wp_footer', function () {
     (function () {
       if (document.querySelector('h1')) return;
       var h = document.createElement('h1');
-      h.textContent = <?php echo wp_json_encode(trim($title), JSON_HEX_TAG | JSON_HEX_AMP); ?>;
+      h.textContent = <?php echo wp_json_encode(trim($title)); ?>;
       // The standard visually-hidden clip pattern: announced, not displayed.
       h.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;';
       var main = document.querySelector('main') || document.body;
@@ -67,7 +63,7 @@ add_action('wp_footer', function () {
     <?php
 }, 5);
 
-add_action('wp_footer', function () {
+add_action('wp_footer', function (): void {
     $o = beacon_settings();
 
     if (empty($o['enabled']) || $o['site_key'] === '') {
@@ -91,19 +87,19 @@ add_action('wp_footer', function () {
     // them as window.BeaconTags on load. wp_json_encode() safely embeds them.
     $rules = beacon_parse_tags($o['tags']);
     if ($rules) {
-        printf("<script>window.BeaconTags=%s;</script>\n", wp_json_encode($rules, JSON_HEX_TAG | JSON_HEX_AMP));
+        printf("<script>window.BeaconTags=%s;</script>\n", wp_json_encode($rules));
     }
 
     // Survey capture selector (opt-in). When present, tracker.js records
     // question + chosen answer as the survey_response label.
     if ($o['survey_selector'] !== '') {
-        printf("<script>window.BeaconSurvey=%s;</script>\n", wp_json_encode($o['survey_selector'], JSON_HEX_TAG | JSON_HEX_AMP));
+        printf("<script>window.BeaconSurvey=%s;</script>\n", wp_json_encode($o['survey_selector']));
 
         // Number-field overrides: STRICT by default. A number input is only
         // captured if the admin listed it here, at the bucket width chosen.
         $num_rules = beacon_parse_number_overrides((string) $o['number_overrides']);
         if ($num_rules) {
-            printf("<script>window.BeaconNumRules=%s;</script>\n", wp_json_encode($num_rules, JSON_HEX_TAG | JSON_HEX_AMP));
+            printf("<script>window.BeaconNumRules=%s;</script>\n", wp_json_encode($num_rules));
         }
     }
 
@@ -111,28 +107,15 @@ add_action('wp_footer', function () {
     // whose submitted value the tracker may read. See settings for the
     // compliance requirements. Off when blank.
     if ($o['study_field'] !== '') {
-        printf("<script>window.BeaconStudyField=%s;</script>\n", wp_json_encode($o['study_field'], JSON_HEX_TAG | JSON_HEX_AMP));
+        printf("<script>window.BeaconStudyField=%s;</script>\n", wp_json_encode($o['study_field']));
     }
 
-    // (b) The tracker itself, served from this plugin's own folder. The page
-    // title is chosen here, not read from the browser: WordPress puts the
-    // visitor's search terms in the title of search pages.
-    $page_path = '';
-    if (is_search()) {
-        $page_title = __('Search results', 'beacon-analytics');
-        $page_path  = '/' . beacon_search_base() . '/'; // never the search words
-    } elseif (is_404()) {
-        $page_title = __('Page not found', 'beacon-analytics');
-    } else {
-        $page_title = html_entity_decode(wp_strip_all_tags(wp_get_document_title()), ENT_QUOTES, 'UTF-8');
-    }
+    // (b) The tracker itself, served from this plugin's own folder.
     printf(
-        "<script defer src=\"%s\" data-site=\"%s\" data-endpoint=\"%s\" data-title=\"%s\"%s></script>\n",
+        "<script defer src=\"%s\" data-site=\"%s\" data-endpoint=\"%s\"></script>\n",
         esc_url(BEACON_URL . 'assets/tracker.js?v=' . BEACON_VERSION),
         esc_attr($site_key),
-        esc_url($endpoint),
-        esc_attr($page_title),
-        $page_path !== '' ? ' data-path="' . esc_attr($page_path) . '"' : ''
+        esc_url($endpoint)
     );
 
     // (c) No-JavaScript fallback: a 1x1 pixel that records the pageview via

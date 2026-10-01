@@ -18,7 +18,7 @@ if (!defined('ABSPATH')) {
 // Lightweight progress endpoint so the page can update its status line in
 // place instead of fully reloading (a full reload every few seconds resets
 // screen-reader position and scroll — an accessibility problem).
-add_action('wp_ajax_beacon_scan_progress', function () {
+add_action('wp_ajax_beacon_scan_progress', function (): void {
     if (!current_user_can('manage_options')) {
         wp_send_json_error(null, 403);
     }
@@ -31,7 +31,7 @@ add_action('wp_ajax_beacon_scan_progress', function () {
     ]);
 });
 
-add_action('admin_post_beacon_start_scan', function () {
+add_action('admin_post_beacon_start_scan', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }
@@ -44,7 +44,7 @@ add_action('admin_post_beacon_start_scan', function () {
     exit;
 });
 
-add_action('admin_post_beacon_clear_scans', function () {
+add_action('admin_post_beacon_clear_scans', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }
@@ -73,7 +73,7 @@ add_action('admin_post_beacon_clear_scans', function () {
     exit;
 });
 
-add_action('admin_post_beacon_finding_status', function () {
+add_action('admin_post_beacon_finding_status', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }
@@ -93,7 +93,7 @@ add_action('admin_post_beacon_finding_status', function () {
 
 /* ---- screen ---- */
 
-function beacon_render_scan()
+function beacon_render_scan(): void
 {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('You do not have permission to view this page.', 'beacon-analytics'));
@@ -282,7 +282,7 @@ function beacon_render_scan()
             [__('New this scan', 'beacon-analytics'), $new_latest, 'plus-alt2'],
             [__('Fixed so far', 'beacon-analytics'), $fixed_total, 'yes-alt'],
         ];
-        foreach ($chips as list($label, $val, $icon)) : ?>
+        foreach ($chips as [$label, $val, $icon]) : ?>
           <div class="beacon-card">
             <p class="beacon-card-label">
               <span class="dashicons dashicons-<?php echo esc_attr($icon); ?>" aria-hidden="true"></span>

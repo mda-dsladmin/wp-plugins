@@ -73,7 +73,7 @@ function beacon_geo_lookup(string $ip): array
  * required "IP geolocation by DB-IP" credit whenever geo is active.
  * ========================================================================= */
 
-add_action('admin_post_beacon_geo_download', function () {
+add_action('admin_post_beacon_geo_download', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }
@@ -104,11 +104,8 @@ function beacon_geo_download_db(): bool
     if (!file_exists($dir . '/index.php')) {
         file_put_contents($dir . '/index.php', "<?php // silence\n");
     }
-    // Block direct downloads on Apache 2.2 and 2.4. (nginx ignores .htaccess;
-    // the data is public anyway, this only saves bandwidth.)
-    $deny = "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n";
-    if (!file_exists($dir . '/.htaccess') || trim((string) file_get_contents($dir . '/.htaccess')) === 'Deny from all') {
-        file_put_contents($dir . '/.htaccess', $deny);
+    if (!file_exists($dir . '/.htaccess')) {
+        file_put_contents($dir . '/.htaccess', "Deny from all\n");
     }
 
     // Monthly file name; fall back one month around release day.
@@ -211,7 +208,7 @@ function beacon_mmdb_lookup(string $file, string $ip)
         }
         if ($node > $node_count) {
             $offset = $node - $node_count - 16 + $data_start;
-            list($value) = beacon_mmdb_decode($fh, $offset, $data_start);
+            [$value] = beacon_mmdb_decode($fh, $offset, $data_start);
             return $value;
         }
         return null;
@@ -247,15 +244,8 @@ function beacon_mmdb_metadata($fh, string $file): array
     if (isset($cache[$file])) {
         return $cache[$file];
     }
-    $size = (int) filesize($file);
-    // Cache the three values we need across requests, keyed to this exact
-    // file, so the collector doesn't re-read 128 KB on every hit.
-    $tkey   = 'beacon_mmdb_meta_' . md5($file . '|' . $size . '|' . (int) filemtime($file));
-    $cached = get_transient($tkey);
-    if (is_array($cached) && isset($cached['node_count'], $cached['record_size'], $cached['ip_version'])) {
-        return $cache[$file] = $cached;
-    }
     $marker = "\xAB\xCD\xEFMaxMind.com";
+    $size   = filesize($file);
     $tail   = min($size, 128 * 1024); // metadata lives in the last 128 KB
     fseek($fh, $size - $tail);
     $chunk = fread($fh, $tail);
@@ -265,40 +255,20 @@ function beacon_mmdb_metadata($fh, string $file): array
     }
     $meta_start = $size - $tail + $pos + strlen($marker);
     // Metadata pointers are relative to the metadata section itself.
-    list($meta) = beacon_mmdb_decode($fh, $meta_start, $meta_start);
+    [$meta] = beacon_mmdb_decode($fh, $meta_start, $meta_start);
     if (!is_array($meta) || !isset($meta['node_count'], $meta['record_size'], $meta['ip_version'])) {
         throw new RuntimeException('Bad mmdb metadata');
     }
-    $keep = [
-        'node_count'  => (int) $meta['node_count'],
-        'record_size' => (int) $meta['record_size'],
-        'ip_version'  => (int) $meta['ip_version'],
-    ];
-    if ($keep['node_count'] < 1 || !in_array($keep['record_size'], [24, 28, 32], true)
-        || !in_array($keep['ip_version'], [4, 6], true)) {
-        throw new RuntimeException('Bad mmdb metadata');
-    }
-    set_transient($tkey, $keep, DAY_IN_SECONDS);
-    return $cache[$file] = $keep;
+    $cache[$file] = $meta;
+    return $meta;
 }
 
 /**
  * Decode one value at $offset. $base is the data-section start, which
  * pointers are relative to. Returns [value, offsetAfterValue].
- *
- * Defensive against a damaged or hostile file: nesting stops at 32 levels,
- * and no string, map, or array may claim more entries than bytes remain.
  */
-function beacon_mmdb_decode($fh, int $offset, int $base, int $depth = 0): array
+function beacon_mmdb_decode($fh, int $offset, int $base): array
 {
-    if ($depth > 32) {
-        throw new RuntimeException('mmdb nesting too deep');
-    }
-    $stat      = fstat($fh);
-    $file_size = is_array($stat) ? (int) $stat['size'] : 0;
-    if ($offset < 0 || $offset >= $file_size) {
-        throw new RuntimeException('mmdb offset out of range');
-    }
     fseek($fh, $offset);
     $ctrl = ord(fread($fh, 1));
     $offset++;
@@ -314,21 +284,13 @@ function beacon_mmdb_decode($fh, int $offset, int $base, int $depth = 0): array
             $v = ($v << 8) | ord($c);
         }
         $low = $ctrl & 0x7;
-        // $psize is always 1-4 (a 2-bit field plus one).
-        switch ($psize) {
-            case 1:
-                $ptr = ($low << 8) | $v;
-                break;
-            case 2:
-                $ptr = (($low << 16) | $v) + 2048;
-                break;
-            case 3:
-                $ptr = (($low << 24) | $v) + 526336;
-                break;
-            default:
-                $ptr = $v;
-        }
-        list($value) = beacon_mmdb_decode($fh, $base + $ptr, $base, $depth + 1);
+        $ptr = match ($psize) {
+            1 => ($low << 8) | $v,
+            2 => (($low << 16) | $v) + 2048,
+            3 => (($low << 24) | $v) + 526336,
+            4 => $v,
+        };
+        [$value] = beacon_mmdb_decode($fh, $base + $ptr, $base);
         return [$value, $offset];
     }
 
@@ -352,10 +314,6 @@ function beacon_mmdb_decode($fh, int $offset, int $base, int $depth = 0): array
         $offset += 3;
     }
 
-    if ($size > $file_size - $offset) {
-        throw new RuntimeException('mmdb size larger than the file');
-    }
-
     switch ($type) {
         case 2: // UTF-8 string
         case 4: // bytes
@@ -363,11 +321,11 @@ function beacon_mmdb_decode($fh, int $offset, int $base, int $depth = 0): array
             return [$v, $offset + $size];
 
         case 3: // double
-            $v = beacon_unpack_be_float(fread($fh, 8));
+            $v = unpack('E', fread($fh, 8))[1];
             return [$v, $offset + 8];
 
         case 15: // float
-            $v = beacon_unpack_be_float(fread($fh, 4));
+            $v = unpack('G', fread($fh, 4))[1];
             return [$v, $offset + 4];
 
         case 5: // uint16
@@ -386,8 +344,8 @@ function beacon_mmdb_decode($fh, int $offset, int $base, int $depth = 0): array
         case 7: // map
             $map = [];
             for ($i = 0; $i < $size; $i++) {
-                list($key, $offset) = beacon_mmdb_decode($fh, $offset, $base, $depth + 1);
-                list($val, $offset) = beacon_mmdb_decode($fh, $offset, $base, $depth + 1);
+                [$key, $offset] = beacon_mmdb_decode($fh, $offset, $base);
+                [$val, $offset] = beacon_mmdb_decode($fh, $offset, $base);
                 $map[(string) $key] = $val;
             }
             return [$map, $offset];
@@ -395,7 +353,7 @@ function beacon_mmdb_decode($fh, int $offset, int $base, int $depth = 0): array
         case 11: // array
             $arr = [];
             for ($i = 0; $i < $size; $i++) {
-                list($val, $offset) = beacon_mmdb_decode($fh, $offset, $base, $depth + 1);
+                [$val, $offset] = beacon_mmdb_decode($fh, $offset, $base);
                 $arr[] = $val;
             }
             return [$arr, $offset];

@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-function beacon_render_journeys()
+function beacon_render_journeys(): void
 {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('You do not have permission to view this page.', 'beacon-analytics'));
@@ -63,7 +63,7 @@ function beacon_render_journeys()
 /**
  * The session list plus funnels, with entry filter and pager.
  */
-function beacon_journeys_list(string $base, string $range, string $entry, int $pg)
+function beacon_journeys_list(string $base, string $range, string $entry, int $pg): void
 {
     $per_page = 50;
     $ranges   = ['1d' => __('24h', 'beacon-analytics'), '7d' => __('7 days', 'beacon-analytics'), '30d' => __('30 days', 'beacon-analytics')];
@@ -221,9 +221,31 @@ function beacon_journeys_list(string $base, string $range, string $entry, int $p
 /**
  * One session's ordered steps.
  */
-function beacon_journeys_detail(string $session_id, string $base, string $range, string $entry = '', int $pg = 1)
+function beacon_journeys_detail(string $session_id, string $base, string $range, string $entry = '', int $pg = 1): void
 {
     $steps = beacon_get_session_steps($session_id);
+
+    // Time on page: from one pageview to the NEXT pageview (events in
+    // between belong to the same page). The final page has no "next", so
+    // its time is unknowable — the visitor closed the tab unseen. Every
+    // analytics tool shares this blind spot; Beacon shows a dash instead
+    // of inventing a number.
+    $durations = [];
+    foreach ($steps as $i => $st) {
+        if ($st['event_type'] !== 'pageview') {
+            continue;
+        }
+        for ($j = $i + 1, $n = count($steps); $j < $n; $j++) {
+            if ($steps[$j]['event_type'] === 'pageview') {
+                $durations[$i] = max(0, strtotime((string) $steps[$j]['created_at'])
+                    - strtotime((string) $st['created_at']));
+                break;
+            }
+        }
+    }
+    $beacon_fmt_dur = static function (int $s): string {
+        return $s >= 60 ? sprintf('%dm %02ds', intdiv($s, 60), $s % 60) : $s . 's';
+    };
     ?>
     <p>
       <a class="beacon-btn" href="<?php echo esc_url(add_query_arg(['range' => $range, 'entry' => $entry, 'pg' => $pg], $base)); ?>">
@@ -238,7 +260,7 @@ function beacon_journeys_detail(string $session_id, string $base, string $range,
         <p class="beacon-muted"><?php esc_html_e('Session not found (it may have been pruned).', 'beacon-analytics'); ?></p>
       <?php else : ?>
         <ol class="beacon-steps">
-          <?php foreach ($steps as $st) : ?>
+          <?php foreach ($steps as $i => $st) : ?>
             <li>
               <span class="beacon-step-time"><?php echo esc_html(get_date_from_gmt((string) $st['created_at'], 'g:i:s a')); ?></span>
               <?php if ($st['event_type'] === 'pageview') : ?>
@@ -248,6 +270,13 @@ function beacon_journeys_detail(string $session_id, string $base, string $range,
                   <?php if ($st['title']) : ?>
                     <span class="beacon-muted"> — <?php echo esc_html((string) $st['title']); ?></span>
                   <?php endif; ?>
+                  <span class="beacon-muted">
+                    <?php
+                    echo isset($durations[$i])
+                        ? esc_html(sprintf(/* translators: %s: duration */ __('(on page %s)', 'beacon-analytics'), $beacon_fmt_dur($durations[$i])))
+                        : esc_html__('(last page — time unknown)', 'beacon-analytics');
+                    ?>
+                  </span>
                 </span>
               <?php else : ?>
                 <span class="beacon-step-type beacon-step-event">

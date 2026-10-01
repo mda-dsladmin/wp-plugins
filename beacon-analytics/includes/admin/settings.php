@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-add_action('admin_init', function () {
+add_action('admin_init', function (): void {
     register_setting('beacon_group', BEACON_OPT, [
         'type'              => 'array',
         'sanitize_callback' => 'beacon_sanitize_settings',
@@ -23,7 +23,7 @@ add_action('admin_init', function () {
  * Admin-only, nonce-checked. Scan results are separate — they have their own
  * clear button on the Site Scan screen.
  */
-add_action('admin_post_beacon_clear_analytics', function () {
+add_action('admin_post_beacon_clear_analytics', function (): void {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
     }
@@ -101,20 +101,14 @@ function beacon_sanitize_settings($input): array
             && preg_match('/^[a-f0-9]{32}$/', trim((string) $input['external_key']))
             ? trim((string) $input['external_key'])
             : '',
-        // Extra sites allowed to post to this collector: hostnames only.
-        'collector_origins'    => implode(', ', array_slice(array_values(array_unique(array_filter(
-            array_map('trim', explode(',', strtolower((string) ($input['collector_origins'] ?? '')))),
-            static function ($h) { return (bool) preg_match('/^[a-z0-9][a-z0-9.-]{0,189}\.[a-z]{2,}$/', $h); }
-        ))), 0, 20)),
         // --- emailed reports ---
-        'report_include_survey' => !empty($input['report_include_survey']) ? 1 : 0,
         // Keep only real email addresses (max 10). Blank = site admin email.
         'report_emails'        => implode(', ', array_slice(array_values(array_unique(array_filter(
             array_map('trim', explode(',', (string) ($input['report_emails'] ?? ''))),
-            static function ($e) { return $e !== '' && is_email($e); }
+            static fn($e) => $e !== '' && is_email($e)
         ))), 0, 10)),
         'report_content'       => implode(',', array_values(array_intersect(
-            ['analytics', 'scan', 'funnels'],
+            ['analytics', 'scan', 'funnels', 'journeys'],
             array_map('sanitize_key', (array) ($input['report_content'] ?? []))
         ))),
         'report_format'        => in_array($input['report_format'] ?? '', ['xlsx', 'pdf', 'csv'], true)
@@ -139,7 +133,7 @@ function beacon_strip_until_stable(string $v): string
     return substr($v, 0, 120);
 }
 
-function beacon_render_settings()
+function beacon_render_settings(): void
 {
     if (!current_user_can('manage_options')) {
         wp_die(esc_html__('You do not have permission to view this page.', 'beacon-analytics'));
@@ -228,16 +222,6 @@ function beacon_render_settings()
           </div>
 
           <div class="beacon-field">
-            <label for="beacon_collector_origins"><?php esc_html_e('Other sites allowed to send events here', 'beacon-analytics'); ?></label>
-            <input name="<?php echo esc_attr($name); ?>[collector_origins]" id="beacon_collector_origins" type="text"
-                   class="beacon-input beacon-code" value="<?php echo esc_attr($o['collector_origins']); ?>"
-                   aria-describedby="beacon_collector_origins_help">
-            <p id="beacon_collector_origins_help" class="beacon-help">
-              <?php esc_html_e('Only for a site that acts as the external collector for other sites. List those sites\' hostnames, comma-separated (e.g. study.example.org). Blank = only this site can send events here.', 'beacon-analytics'); ?>
-            </p>
-          </div>
-
-          <div class="beacon-field">
             <span class="beacon-label"><?php esc_html_e('Site key', 'beacon-analytics'); ?></span>
             <code class="beacon-key"><?php echo esc_html($o['site_key'] !== '' ? $o['site_key'] : __('Generated on activation', 'beacon-analytics')); ?></code>
             <p class="beacon-help"><?php esc_html_e('Created automatically for this site. The collector only accepts events carrying this key.', 'beacon-analytics'); ?></p>
@@ -267,7 +251,7 @@ function beacon_render_settings()
                    placeholder="sl, utm_source, utm_campaign"
                    aria-describedby="beacon_query_keys_help">
             <p id="beacon_query_keys_help" class="beacon-help">
-              <?php esc_html_e('Query strings are stripped from URLs before storage. List keys here (comma-separated) to keep just those, so a redirect landing on /?sl=breast shows up as its own page. Never list keys that could carry personal info. Values are still digit-masked. Search, email, name, and similar keys (s, q, email, name, token, ...) are always ignored, even if listed.', 'beacon-analytics'); ?>
+              <?php esc_html_e('Query strings are stripped from URLs before storage. List keys here (comma-separated) to keep just those, so a redirect landing on /?sl=breast shows up as its own page. Never list keys that could carry personal info. Values are still digit-masked.', 'beacon-analytics'); ?>
             </p>
           </div>
 
@@ -413,6 +397,7 @@ function beacon_render_settings()
                 'analytics' => __('Analytics summary (visits, pages, devices, locations, surveys)', 'beacon-analytics'),
                 'scan'      => __('Site scan results (open findings)', 'beacon-analytics'),
                 'funnels'   => __('Funnels', 'beacon-analytics'),
+                'journeys'  => __('Journeys (recent sessions and their steps)', 'beacon-analytics'),
             ];
             foreach ($beacon_content_opts as $beacon_k => $beacon_label) :
             ?>
@@ -433,13 +418,6 @@ function beacon_render_settings()
             </select>
             <p class="beacon-help"><?php esc_html_e('The email body shows the key totals; the attachment has every table.', 'beacon-analytics'); ?></p>
           </div>
-
-          <p class="beacon-field">
-            <label class="beacon-check">
-              <input type="checkbox" name="<?php echo esc_attr($name); ?>[report_include_survey]" value="1" <?php checked($o['report_include_survey'], 1); ?>>
-              <?php esc_html_e('Include survey answers in emailed reports (off by default; email is less protected than this dashboard)', 'beacon-analytics'); ?>
-            </label>
-          </p>
 
           <fieldset class="beacon-field">
             <legend class="beacon-label"><?php esc_html_e('How often (pick any)', 'beacon-analytics'); ?></legend>
@@ -485,7 +463,7 @@ function beacon_render_settings()
           <p class="beacon-field">
             <label class="beacon-check">
               <input type="checkbox" name="<?php echo esc_attr($name); ?>[scan_check_external]" value="1" <?php checked($o['scan_check_external'], 1); ?>>
-              <?php esc_html_e('Also check links to other sites (sends HEAD requests to them; no visitor data involved). Private and internal addresses are never requested.', 'beacon-analytics'); ?>
+              <?php esc_html_e('Also check outbound links (sends HEAD requests to other sites; no visitor data involved)', 'beacon-analytics'); ?>
             </label>
           </p>
 

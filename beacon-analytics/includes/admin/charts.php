@@ -45,7 +45,7 @@ function beacon_svg_line(array $series): string
         $y = ($h - $pad_b) - ((int) $r['views'] / $max) * ($h - $pad_b - 8);
         $pts[] = [round($x, 1), round($y, 1), (string) $r['day'], (int) $r['views']];
     }
-    $poly = implode(' ', array_map(static function ($p) { return $p[0] . ',' . $p[1]; }, $pts));
+    $poly = implode(' ', array_map(static fn ($p) => $p[0] . ',' . $p[1], $pts));
 
     // Uniform scaling (no preserveAspectRatio=none) so tick text never
     // stretches; the viewBox is wide, so it fills the card naturally.
@@ -54,7 +54,7 @@ function beacon_svg_line(array $series): string
     $svg .= '<line x1="' . $pad_l . '" y1="' . ($h - $pad_b) . '" x2="' . ($w - $pad_l) . '" y2="' . ($h - $pad_b) . '" class="beacon-axis"/>';
     $svg .= '<polyline points="' . esc_attr($poly) . '" fill="none" class="beacon-line"/>';
     $label_every = max(1, (int) ceil($n / 12));
-    foreach ($pts as $i => list($x, $y, $day, $views)) {
+    foreach ($pts as $i => [$x, $y, $day, $views]) {
         $svg .= '<circle cx="' . $x . '" cy="' . $y . '" r="4" class="beacon-dot">'
               . '<title>' . esc_html($day . ': ' . number_format_i18n($views) . ' views') . '</title></circle>';
         if ($i % $label_every === 0) {

@@ -24,7 +24,7 @@ function beacon_page_hooks(array $add = []): array
     return $hooks;
 }
 
-add_action('admin_menu', function () {
+add_action('admin_menu', function (): void {
     $hooks = [];
     $hooks[] = add_menu_page(
         __('Beacon Analytics', 'beacon-analytics'),
@@ -71,7 +71,7 @@ add_action('admin_menu', function () {
 });
 
 // Load the scoped Beacon styles only on our own screens.
-add_action('admin_enqueue_scripts', function (string $hook) {
+add_action('admin_enqueue_scripts', function (string $hook): void {
     if (!in_array($hook, beacon_page_hooks(), true)) {
         return;
     }

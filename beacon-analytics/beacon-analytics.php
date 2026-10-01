@@ -2,13 +2,13 @@
 /**
  * Plugin Name:       Beacon Analytics
  * Description:       Self-hosted, privacy-first analytics that live entirely inside this WordPress site. Collector, tracker, tag manager, and dashboard — no third-party calls, no cookies, no IPs stored.
- * Version:           1.17.0
+ * Version:           1.17.1
  * Requires at least: 6.0
- * Requires PHP:      7.0
- * Author:            Montez French | Senior Web Developer at MD Anderson
+ * Requires PHP:      8.0
+ * Author:            Montez French
  * License:           GPL-2.0-or-later
  * Text Domain:       beacon-analytics
- * Update URI:        https://github.com/mda-dsladmin/wp-plugins/tree/main/beacon-analytics
+ * Update URI:        https://envsnstudios.com/plugins/beacon-analytics
  *
  * HOW THE PIECES FIT
  * ------------------
@@ -22,9 +22,7 @@
  * collector) and this site stores nothing.
  *
  * Files:
- *   includes/compat.php         PHP 7.0 compatibility helpers
  *   includes/privacy.php        scrubbing rules (the privacy contract)
- *   includes/updates.php        updates from GitHub Releases
  *   includes/collector.php      REST endpoint that receives and stores events
  *   includes/stats.php          dashboard queries
  *   includes/tags.php           first-party tag rules parser
@@ -39,15 +37,13 @@ if (!defined('ABSPATH')) {
 }
 
 const BEACON_OPT     = 'beacon_analytics_settings';
-const BEACON_SALT    = 'beacon_analytics_salt';     // legacy permanent salt (pre-1.17); deleted on upgrade
-const BEACON_DAY_SALT = 'beacon_analytics_day_salt'; // today's salt; replaced daily, see beacon_day_salt()
-const BEACON_VERSION = '1.17.0';
+const BEACON_SALT    = 'beacon_analytics_salt';
+const BEACON_VERSION = '1.17.1';
 
 define('BEACON_FILE', __FILE__);
 define('BEACON_DIR', plugin_dir_path(__FILE__));
 define('BEACON_URL', plugin_dir_url(__FILE__));
 
-require_once BEACON_DIR . 'includes/compat.php';
 require_once BEACON_DIR . 'includes/privacy.php';
 require_once BEACON_DIR . 'includes/geo.php';
 require_once BEACON_DIR . 'includes/tags.php';
@@ -97,7 +93,7 @@ function beacon_settings(): array
         // --- site scan (Phase 2) ---
         'scan_weekly'          => 0,    // run a scan automatically every week
         'scan_max_pages'       => 200,  // page cap per scan
-        'scan_check_external'  => 0,    // also check links to other sites (off by default)
+        'scan_check_external'  => 1,    // HEAD-check outbound links too
         'scan_allowed_domains' => '',   // extra first-party domains, comma-sep
         'scan_stale_months'    => 18,   // flag pages not updated in N months
         'scan_policy_rules'    => '',   // one rule per line: pattern | severity | message
@@ -122,7 +118,7 @@ function beacon_settings(): array
         'fix_missing_h1'       => 0,
         // --- emailed reports ---
         'report_emails'        => '',   // comma-separated; blank = admin email
-        'report_content'       => 'analytics,scan,funnels',
+        'report_content'       => 'analytics,scan,funnels,journeys',
         'report_format'        => 'xlsx', // xlsx | pdf | csv
         'report_intervals'     => '',   // comma-separated keys, e.g. '2w,3m'
         // Study code capture (IDENTIFIABLE — opt in). The id of ONE input
@@ -132,12 +128,6 @@ function beacon_settings(): array
         // authorization (consent) and hosting allowed to hold identifiable
         // health data. See docs/SECURITY-AND-PRIVACY.md.
         'study_field'          => '',
-        // Extra origins (hosts) allowed to post to THIS site's collector,
-        // for sites that send their tracking here as an external collector.
-        // Comma-separated hostnames. Blank = only this site itself.
-        'collector_origins'    => '',
-        // Emailed reports leave out survey answers unless this is on.
-        'report_include_survey' => 0,
     ];
     $saved = get_option(BEACON_OPT, []);
     return is_array($saved) ? array_merge($defaults, $saved) : $defaults;
@@ -158,7 +148,7 @@ function beacon_collect_url(): string
  * a plugin update (see the version check below). Safe to run repeatedly —
  * dbDelta only applies differences.
  */
-function beacon_install()
+function beacon_install(): void
 {
     global $wpdb;
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
@@ -260,32 +250,15 @@ function beacon_install()
         $o['site_key'] = bin2hex(random_bytes(16));
         update_option(BEACON_OPT, $o);
     }
-    // The old permanent salt made stored hashes reversible for anyone with a
-    // database copy. Hashes are now keyed with a salt that is replaced every
-    // day (beacon_day_salt()), so the permanent one is deleted.
-    delete_option(BEACON_SALT);
-
-    // Rate-limit counters used to be transients (two wp_options rows per IP
-    // per minute). They now live in wp_beacon_rate; clear any leftovers.
-    $wpdb->query($wpdb->prepare(
-        "DELETE FROM {$wpdb->options} WHERE option_name LIKE %s OR option_name LIKE %s",
-        $wpdb->esc_like('_transient_beacon_rl_') . '%',
-        $wpdb->esc_like('_transient_timeout_beacon_rl_') . '%'
-    ));
+    if (!get_option(BEACON_SALT)) {
+        // Long random secret for the daily-rotating visitor hash. Never shown
+        // in any UI, never sent to the browser.
+        add_option(BEACON_SALT, bin2hex(random_bytes(32)), '', false);
+    }
 
     if (!wp_next_scheduled('beacon_daily_prune')) {
         wp_schedule_event(time() + DAY_IN_SECONDS, 'daily', 'beacon_daily_prune');
     }
-    // Rate-limit counters (collector). One small row per active bucket,
-    // pruned daily, instead of transients piling up in wp_options.
-    dbDelta("CREATE TABLE {$wpdb->prefix}beacon_rate (
-        bucket char(40) NOT NULL,
-        hits int(10) unsigned NOT NULL DEFAULT 0,
-        expires int(10) unsigned NOT NULL,
-        PRIMARY KEY  (bucket),
-        KEY idx_expires (expires)
-    ) {$charset};");
-
     // Twice a day, check whether any emailed report has come due. Fires
     // often so a report lands near its due time even on quiet sites.
     if (!wp_next_scheduled('beacon_email_tick')) {
@@ -299,18 +272,18 @@ register_activation_hook(__FILE__, 'beacon_install');
 
 // After a plugin update the activation hook does NOT fire — catch the version
 // change here so new tables (like the scan tables) get created.
-add_action('plugins_loaded', function () {
+add_action('plugins_loaded', function (): void {
     if (get_option('beacon_db_version') !== BEACON_VERSION) {
         beacon_install();
     }
 });
 
-register_deactivation_hook(__FILE__, function () {
+register_deactivation_hook(__FILE__, function (): void {
     wp_clear_scheduled_hook('beacon_daily_prune');
     wp_clear_scheduled_hook('beacon_weekly_scan');
     wp_clear_scheduled_hook('beacon_email_tick');
     // Tick events carry args, which clear_scheduled_hook (default args)
     // misses — unschedule_hook removes every event for the hook.
     wp_unschedule_hook('beacon_scan_tick');
-    delete_site_transient('beacon_update_info'); // cache from the pre-1.17 updater
+    delete_site_transient('beacon_update_info');
 });

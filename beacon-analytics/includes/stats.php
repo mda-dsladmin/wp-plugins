@@ -24,9 +24,16 @@ function beacon_range_to_days(string $range): int
  * Totals, daily series, top pages, referrers, devices, browsers, and custom
  * events for one date range.
  */
-function beacon_get_summary(string $range): array
+function beacon_get_summary(string $range, int $limit = 10): array
 {
     global $wpdb;
+
+    // Table depth. The dashboard shows the top 10; exports and emailed
+    // reports pass a higher limit so quieter pages (like /?sl=... redirect
+    // landings) are included instead of falling below the cut.
+    $lim  = (int) max(1, min(500, $limit));
+    $lim2 = (int) max(8, min(500, $limit));   // browsers/oses (dashboard: 8)
+    $lim3 = (int) max(15, min(500, $limit));  // exit urls (dashboard: 15)
 
     $table = beacon_table();
     $days  = beacon_range_to_days($range);
@@ -70,7 +77,7 @@ function beacon_get_summary(string $range): array
         "SELECT path, COUNT(*) AS views
          FROM {$table}
          WHERE event_type = 'pageview' AND created_at >= %s
-         GROUP BY path ORDER BY views DESC LIMIT 10",
+         GROUP BY path ORDER BY views DESC LIMIT {$lim}",
         $since
     ), ARRAY_A);
 
@@ -78,7 +85,7 @@ function beacon_get_summary(string $range): array
         "SELECT COALESCE(referrer_host, '(direct)') AS host, COUNT(*) AS views
          FROM {$table}
          WHERE event_type = 'pageview' AND created_at >= %s
-         GROUP BY host ORDER BY views DESC LIMIT 10",
+         GROUP BY host ORDER BY views DESC LIMIT {$lim}",
         $since
     ), ARRAY_A);
 
@@ -99,7 +106,7 @@ function beacon_get_summary(string $range): array
                 COUNT(*) AS views
          FROM {$table}
          WHERE event_type = 'pageview' AND created_at >= %s
-         GROUP BY browser, browser_ver ORDER BY views DESC LIMIT 8",
+         GROUP BY browser, browser_ver ORDER BY views DESC LIMIT {$lim2}",
         $since
     ), ARRAY_A);
 
@@ -109,7 +116,7 @@ function beacon_get_summary(string $range): array
                 COUNT(*) AS views
          FROM {$table}
          WHERE event_type = 'pageview' AND created_at >= %s AND os IS NOT NULL
-         GROUP BY os, os_ver ORDER BY views DESC LIMIT 8",
+         GROUP BY os, os_ver ORDER BY views DESC LIMIT {$lim2}",
         $since
     ), ARRAY_A);
 
@@ -152,7 +159,7 @@ function beacon_get_summary(string $range): array
          FROM {$table}
          WHERE event_type = 'outbound' AND event_name IS NOT NULL
            AND created_at >= %s
-         GROUP BY event_name, event_label ORDER BY fires DESC LIMIT 15",
+         GROUP BY event_name, event_label ORDER BY fires DESC LIMIT {$lim3}",
         $since
     ), ARRAY_A);
 
@@ -163,7 +170,7 @@ function beacon_get_summary(string $range): array
          JOIN (SELECT session_id, MIN(id) AS mid FROM {$table}
                WHERE event_type = 'pageview' AND session_id IS NOT NULL AND created_at >= %s
                GROUP BY session_id) s ON e.id = s.mid
-         GROUP BY e.path ORDER BY views DESC LIMIT 10",
+         GROUP BY e.path ORDER BY views DESC LIMIT {$lim}",
         $since
     ), ARRAY_A);
 
@@ -173,7 +180,7 @@ function beacon_get_summary(string $range): array
          JOIN (SELECT session_id, MAX(id) AS mid FROM {$table}
                WHERE event_type = 'pageview' AND session_id IS NOT NULL AND created_at >= %s
                GROUP BY session_id) s ON e.id = s.mid
-         GROUP BY e.path ORDER BY views DESC LIMIT 10",
+         GROUP BY e.path ORDER BY views DESC LIMIT {$lim}",
         $since
     ), ARRAY_A);
 
@@ -182,7 +189,7 @@ function beacon_get_summary(string $range): array
         "SELECT country, COUNT(*) AS views
          FROM {$table}
          WHERE event_type = 'pageview' AND created_at >= %s AND country IS NOT NULL
-         GROUP BY country ORDER BY views DESC LIMIT 10",
+         GROUP BY country ORDER BY views DESC LIMIT {$lim}",
         $since
     ), ARRAY_A);
 
@@ -191,7 +198,7 @@ function beacon_get_summary(string $range): array
          FROM {$table}
          WHERE event_type = 'pageview' AND created_at >= %s
            AND country = 'US' AND region IS NOT NULL
-         GROUP BY region ORDER BY views DESC LIMIT 10",
+         GROUP BY region ORDER BY views DESC LIMIT {$lim}",
         $since
     ), ARRAY_A);
 
@@ -319,7 +326,7 @@ function beacon_parse_funnels(string $text): array
         if (count($parts) < 2) {
             continue;
         }
-        list($name, $steps_raw) = $parts;
+        [$name, $steps_raw] = $parts;
         $steps = [];
         foreach (explode('>', $steps_raw) as $step) {
             $step = trim($step);
@@ -355,14 +362,9 @@ function beacon_eval_funnels(array $funnels, string $range): array
     $table = beacon_table();
     $since = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
 
-    // Bounded pull done session-first: take the most recent sessions, then
-    // their steps. Memory is bounded three ways: at most 1500 sessions, at
-    // most 60000 rows in total, and at most 200 steps counted per session
-    // (the collector also caps a session at 1000 events a day), so a flood
-    // of junk events can't exhaust memory on this page or in a report.
-    $cap      = 1500;
-    $row_cap  = 60000;
-    $step_cap = 200;
+    // Bounded pull done session-first: take the most recent COMPLETE
+    // sessions (never a session cut off mid-visit), then their steps.
+    $cap  = 1500;
     $rows = $wpdb->get_results($wpdb->prepare(
         "SELECT e.session_id, e.event_type, e.event_name, e.path
          FROM {$table} e
@@ -371,23 +373,17 @@ function beacon_eval_funnels(array $funnels, string $range): array
                GROUP BY session_id ORDER BY MAX(id) DESC LIMIT %d) s
            ON s.session_id = e.session_id
          WHERE e.created_at >= %s
-         ORDER BY e.session_id, e.id
-         LIMIT %d",
+         ORDER BY e.session_id, e.id",
         $since,
         $cap,
-        $since,
-        $row_cap
+        $since
     ), ARRAY_A);
 
     $sessions = [];
-    foreach ((array) $rows as $r) {
-        $sid = $r['session_id'];
-        if (!isset($sessions[$sid]) || count($sessions[$sid]) < $step_cap) {
-            $sessions[$sid][] = $r;
-        }
+    foreach ($rows as $r) {
+        $sessions[$r['session_id']][] = $r;
     }
-    $sampled = count($sessions) >= $cap || count((array) $rows) >= $row_cap;
-    unset($rows);
+    $sampled = count($sessions) >= $cap;
 
     $results = [];
     foreach ($funnels as $f) {
@@ -411,4 +407,28 @@ function beacon_eval_funnels(array $funnels, string $range): array
         $results[] = ['name' => $f['name'], 'steps' => $f['steps'], 'counts' => $counts, 'sampled' => $sampled];
     }
     return $results;
+}
+
+/**
+ * All steps for a set of sessions in one query (for exports/reports).
+ * Bounded: at most 100 sessions, 5000 steps.
+ *
+ * @param string[] $session_ids
+ */
+function beacon_get_steps_for_sessions(array $session_ids): array
+{
+    global $wpdb;
+    $ids = array_values(array_filter(array_slice($session_ids, 0, 100),
+        static fn($s) => is_string($s) && preg_match('/^[a-f0-9]{32}$/', $s)));
+    if (!$ids) {
+        return [];
+    }
+    $ph = implode(',', array_fill(0, count($ids), '%s'));
+    return $wpdb->get_results($wpdb->prepare(
+        "SELECT session_id, event_type, event_name, event_label, path, created_at
+         FROM " . beacon_table() . "
+         WHERE session_id IN ({$ph})
+         ORDER BY session_id, id LIMIT 5000", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+        ...$ids
+    ), ARRAY_A);
 }

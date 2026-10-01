@@ -11,7 +11,7 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
-add_action('beacon_daily_prune', function () {
+add_action('beacon_daily_prune', function (): void {
     global $wpdb;
 
     $days = (int) beacon_settings()['retention_days'];
