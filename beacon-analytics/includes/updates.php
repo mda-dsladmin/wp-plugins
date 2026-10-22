@@ -134,3 +134,65 @@ add_filter('plugins_api', function ($result, $action, $args) {
         ],
     ];
 }, 10, 3);
+
+// ---- "Check for updates" link on the Plugins screen ----
+// A one-click force check: clears Beacon's cached answer AND WordPress's
+// own plugin-update cache, asks the update server right away, then comes
+// back to the Plugins screen with a notice saying what it found.
+add_filter('plugin_row_meta', function ($links, $file) {
+    if ($file !== plugin_basename(BEACON_FILE) || !current_user_can('update_plugins')) {
+        return $links;
+    }
+    $url = wp_nonce_url(admin_url('admin-post.php?action=beacon_check_updates'), 'beacon_check_updates');
+    $links[] = '<a href="' . esc_url($url) . '">' . esc_html__('Check for updates', 'beacon-analytics') . '</a>';
+    return $links;
+}, 10, 2);
+
+add_action('admin_post_beacon_check_updates', function (): void {
+    if (!current_user_can('update_plugins')) {
+        wp_die(esc_html__('Not allowed.', 'beacon-analytics'));
+    }
+    check_admin_referer('beacon_check_updates');
+
+    delete_site_transient('beacon_update_info'); // Beacon's 6h cache
+    delete_site_transient('update_plugins');     // WordPress's cache
+    wp_update_plugins();                         // ask now, not on the next cron
+
+    $info = beacon_update_fetch_info();          // fresh, cached by the call above
+    if ($info === null) {
+        $msg = 'unreachable';
+    } elseif (version_compare($info['version'], BEACON_VERSION, '>')) {
+        $msg = 'available';
+    } else {
+        $msg = 'current';
+    }
+    wp_safe_redirect(add_query_arg(['beacon_update' => $msg], admin_url('plugins.php')));
+    exit;
+});
+
+add_action('admin_notices', function (): void {
+    global $pagenow;
+    if ($pagenow !== 'plugins.php' || !isset($_GET['beacon_update'])) { // phpcs:ignore WordPress.Security.NonceVerification -- display only
+        return;
+    }
+    $state = sanitize_key(wp_unslash($_GET['beacon_update'])); // phpcs:ignore WordPress.Security.NonceVerification -- display only
+    $info  = get_site_transient('beacon_update_info');
+    if ($state === 'available' && is_array($info) && isset($info['version'])) {
+        $cls  = 'notice-warning';
+        $text = sprintf(
+            /* translators: 1: new version, 2: installed version */
+            __('Beacon %1$s is available (you have %2$s). Use "update now" in the Beacon row below.', 'beacon-analytics'),
+            $info['version'],
+            BEACON_VERSION
+        );
+    } elseif ($state === 'current') {
+        $cls  = 'notice-success';
+        $text = sprintf(/* translators: %s: installed version */ __('Beacon is up to date (%s).', 'beacon-analytics'), BEACON_VERSION);
+    } elseif ($state === 'unreachable') {
+        $cls  = 'notice-error';
+        $text = __('Could not reach the Beacon update server. Check that update.php or manifest.json is online, then try again.', 'beacon-analytics');
+    } else {
+        return;
+    }
+    printf('<div class="notice %s is-dismissible"><p>%s</p></div>', esc_attr($cls), esc_html($text));
+});
