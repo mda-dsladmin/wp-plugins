@@ -100,7 +100,7 @@ function beacon_store_event(array $in): void
     if (!$dnt) {
         $ip           = beacon_client_ip();
         $visitor_hash = beacon_visitor_day_hash($ip, $ua);
-        $session_id   = substr(hash('sha256', (string) ($in['sid'] ?? '') . $visitor_hash), 0, 32);
+        $session_id   = beacon_stitch_session($visitor_hash, (string) ($in['sid'] ?? ''));
         // Local file lookup, country + state ONLY (Safe Harbor posture).
         [$country, $region] = beacon_geo_lookup($ip);
         unset($ip); // explicit: the IP is never written
@@ -213,4 +213,29 @@ function beacon_collect_pixel(WP_REST_Request $req)
     header('Cache-Control: no-store');
     echo base64_decode('R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7');
     exit;
+}
+
+/**
+ * Sessions are stitched on the SERVER. The tracker's sid lives in page
+ * memory, so it is fresh on every page load (nothing is stored on the
+ * visitor's device, by design). A visit therefore = the same daily visitor
+ * hash with no gap longer than 30 minutes, the same rule Google Analytics
+ * uses. The first hit of a visit mints the session code; every later hit
+ * within 30 minutes of the visitor's previous hit reuses it. The visitor
+ * hash rotates at local midnight, so a visit also ends at midnight.
+ */
+function beacon_stitch_session(string $visitor_hash, string $sid): string
+{
+    global $wpdb;
+    $last = $wpdb->get_row($wpdb->prepare(
+        'SELECT session_id, created_at FROM ' . beacon_table() . '
+         WHERE visitor_day_hash = %s AND session_id IS NOT NULL
+         ORDER BY id DESC LIMIT 1',
+        $visitor_hash
+    ), ARRAY_A);
+    $window = (int) apply_filters('beacon_session_timeout', 30 * MINUTE_IN_SECONDS);
+    if ($last && strtotime((string) $last['created_at'] . ' UTC') >= time() - $window) {
+        return (string) $last['session_id'];
+    }
+    return substr(hash('sha256', $sid . $visitor_hash . microtime(true)), 0, 32);
 }

@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Beacon Analytics
  * Description:       Self-hosted, privacy-first analytics that live entirely inside this WordPress site. Collector, tracker, tag manager, and dashboard — no third-party calls, no cookies, no IPs stored.
- * Version:           1.17.1
+ * Version:           1.18.0
  * Requires at least: 6.0
  * Requires PHP:      8.0
  * Author:            Montez French
@@ -38,7 +38,7 @@ if (!defined('ABSPATH')) {
 
 const BEACON_OPT     = 'beacon_analytics_settings';
 const BEACON_SALT    = 'beacon_analytics_salt';
-const BEACON_VERSION = '1.17.1';
+const BEACON_VERSION = '1.18.0';
 
 define('BEACON_FILE', __FILE__);
 define('BEACON_DIR', plugin_dir_path(__FILE__));
@@ -183,7 +183,8 @@ function beacon_install(): void
         PRIMARY KEY  (id),
         KEY idx_time (created_at),
         KEY idx_type_time (event_type, created_at),
-        KEY idx_session (session_id, id)
+        KEY idx_session (session_id, id),
+        KEY idx_visitor (visitor_day_hash, id)
     ) {$charset};");
 
     // ---- Phase 2: site-quality scan tables ----

@@ -229,3 +229,14 @@ data (a BAA-covered server; use the Collector URL setting to send events
 to one if this site's host does not qualify). With the setting blank —
 the default — none of this code path runs and the plugin's fully
 de-identified posture is unchanged.
+
+## Visits (sessions), exports, and date ranges (v1.18.0)
+
+A visit is the same daily visitor hash with no gap longer than 30 minutes,
+stitched on the server (the GA rule). Journeys, entry/exit pages, funnels,
+and time on page all build on this. The dashboard exports to CSV (one
+sheet, as the format allows) and Excel (one tab per table, matching the
+emailed reports). Reports include "Pageviews by entry link": pageviews per
+day, split by the entry link each visit started on, for entry links with an
+allow-listed query key (like /?sl=gyn). "All time" covers everything still
+stored, which the retention setting bounds (7 to 730 days).

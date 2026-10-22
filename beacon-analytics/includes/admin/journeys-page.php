@@ -20,7 +20,7 @@ function beacon_render_journeys(): void
     }
 
     $range = isset($_GET['range']) ? sanitize_key(wp_unslash($_GET['range'])) : '1d';
-    if (!in_array($range, ['1d', '7d', '30d'], true)) {
+    if (!in_array($range, ['1d', '7d', '30d', 'all'], true)) {
         $range = '1d';
     }
     $session = isset($_GET['session']) ? sanitize_key(wp_unslash($_GET['session'])) : '';
@@ -66,7 +66,7 @@ function beacon_render_journeys(): void
 function beacon_journeys_list(string $base, string $range, string $entry, int $pg): void
 {
     $per_page = 50;
-    $ranges   = ['1d' => __('24h', 'beacon-analytics'), '7d' => __('7 days', 'beacon-analytics'), '30d' => __('30 days', 'beacon-analytics')];
+    $ranges   = ['1d' => __('24h', 'beacon-analytics'), '7d' => __('7 days', 'beacon-analytics'), '30d' => __('30 days', 'beacon-analytics'), 'all' => __('All time', 'beacon-analytics')];
     $total    = beacon_count_sessions($range, $entry);
     $pages    = max(1, (int) ceil($total / $per_page));
     $pg       = min($pg, $pages);

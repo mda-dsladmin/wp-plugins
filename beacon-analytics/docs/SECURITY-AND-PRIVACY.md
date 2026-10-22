@@ -53,7 +53,7 @@ Table `wp_beacon_events` (created in beacon-analytics.php):
 | title | Breast Pathway | page title, truncated |
 | referrer_host | google.com | host only, never the full URL |
 | visitor_day_hash | sha256(...) | rotates daily, see §4 |
-| session_id | sha256(...) 32 chars | one visit, dies with the tab |
+| session_id | sha256(...) 32 chars | one visit: same daily visitor hash, no gap over 30 min; ends at local midnight |
 | country / region | US / Texas | optional, state max, see §6 |
 | device_type | mobile | coarse bucket |
 | browser / browser_ver | Chrome / 143 | family + MAJOR version only |
@@ -86,7 +86,7 @@ midnight.
   the hash, the same visitor produces an unlinkable new value every day.
   It answers "how many unique visitors today" and nothing else. It cannot
   be reversed, and two days of data cannot be joined on it.
-- **Session ID**: hash of a random per-tab value plus the visitor hash.
+- **Session ID**: minted on the first hit of a visit (hash of a random page-load value, the visitor hash, and the time) and reused for every later hit from the same daily visitor hash within 30 minutes of their previous hit. Stitching happens on the server, so nothing is stored on the visitor's device. Because the visitor hash rotates at local midnight, no visit can extend past a day or be linked to another day's visit. (Before v1.18.0, each page load got its own session, so journeys were one page long and entry and exit pages matched.)
   Links the steps of one visit so journeys and funnels work. Not a cookie;
   it lives in tab memory and is gone when the tab closes.
 - **Do Not Track / GPC**: honored. Default mode counts the visit with NO

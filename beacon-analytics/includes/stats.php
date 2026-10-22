@@ -12,6 +12,18 @@ if (!defined('ABSPATH')) {
 
 function beacon_range_to_days(string $range): int
 {
+    // 'all' = everything still stored (bounded by the retention setting):
+    // days since the oldest stored event, at least 1.
+    if ($range === 'all') {
+        static $all = null;
+        if ($all === null) {
+            global $wpdb;
+            $oldest = $wpdb->get_var('SELECT MIN(created_at) FROM ' . beacon_table()); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $all = $oldest ? (int) ceil((time() - strtotime($oldest . ' UTC')) / DAY_IN_SECONDS) + 1 : 1;
+            $all = max(1, min(3650, $all));
+        }
+        return $all;
+    }
     // Any "<days>d" between 1 and 365 works ('14d', '91d', ...). The
     // dashboard uses 1d/7d/30d/90d; emailed reports use the longer spans.
     if (preg_match('/^(\d{1,3})d$/', $range, $m)) {
@@ -431,4 +443,73 @@ function beacon_get_steps_for_sessions(array $session_ids): array
          ORDER BY session_id, id LIMIT 5000", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         ...$ids
     ), ARRAY_A);
+}
+
+/**
+ * Pageviews per day, split by the visit's ENTRY link — for entry links that
+ * carry an allow-listed query key (like /?sl=gyn). Each pageview counts
+ * toward the link its visit started on. "Other" = every remaining pageview
+ * (visits that entered elsewhere, plus Do-Not-Track hits with no visit).
+ * Returns [] when no entry link carries a query string.
+ *
+ * @return array{headers: string[], rows: array}
+ */
+function beacon_get_entry_link_series(string $range, int $max_cols = 25): array
+{
+    global $wpdb;
+    $table  = beacon_table();
+    $days   = beacon_range_to_days($range);
+    $since  = gmdate('Y-m-d H:i:s', time() - $days * DAY_IN_SECONDS);
+    $offset = (int) wp_timezone()->getOffset(new DateTimeImmutable('now'));
+
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT DATE(DATE_ADD(e.created_at, INTERVAL %d SECOND)) AS day, fe.path AS entry, COUNT(*) AS views
+         FROM {$table} e
+         JOIN (SELECT session_id, MIN(id) AS mid FROM {$table}
+               WHERE event_type = 'pageview' AND session_id IS NOT NULL AND created_at >= %s
+               GROUP BY session_id) fm ON fm.session_id = e.session_id
+         JOIN {$table} fe ON fe.id = fm.mid
+         WHERE e.event_type = 'pageview' AND e.created_at >= %s AND fe.path LIKE %s
+         GROUP BY day, fe.path",
+        $offset, $since, $since, '%' . $wpdb->esc_like('?') . '%'
+    ), ARRAY_A);
+    if (!$rows) {
+        return [];
+    }
+
+    // Columns: busiest entry links first.
+    $tot = [];
+    foreach ($rows as $r) {
+        $tot[$r['entry']] = ($tot[$r['entry']] ?? 0) + (int) $r['views'];
+    }
+    arsort($tot);
+    $cols = array_slice(array_keys($tot), 0, $max_cols);
+
+    $grid = [];
+    foreach ($rows as $r) {
+        if (in_array($r['entry'], $cols, true)) {
+            $grid[$r['day']][$r['entry']] = (int) $r['views'];
+        }
+    }
+
+    $headers = [__('Day', 'beacon-analytics'), __('Total views', 'beacon-analytics')];
+    foreach ($cols as $c) {
+        $q = (string) parse_url($c, PHP_URL_QUERY);           // "sl=gyn"
+        $headers[] = $q !== '' ? $q : $c;
+    }
+    $headers[] = __('Other', 'beacon-analytics');
+
+    $out = [];
+    foreach (beacon_get_summary($range, 1)['series'] as $d) {   // zero-filled days
+        $row = [$d['day'], (int) $d['views']];
+        $sum = 0;
+        foreach ($cols as $c) {
+            $v = $grid[$d['day']][$c] ?? 0;
+            $row[] = $v;
+            $sum += $v;
+        }
+        $row[] = max(0, (int) $d['views'] - $sum);
+        $out[] = $row;
+    }
+    return ['headers' => $headers, 'rows' => $out];
 }

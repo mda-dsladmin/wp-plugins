@@ -20,7 +20,7 @@ function beacon_render_dashboard(): void
     $o = beacon_settings();
 
     $range = isset($_GET['range']) ? sanitize_key(wp_unslash($_GET['range'])) : '7d';
-    if (!in_array($range, ['1d', '7d', '30d', '90d'], true)) {
+    if (!in_array($range, ['1d', '7d', '30d', '90d', 'all'], true)) {
         $range = '7d';
     }
 
@@ -35,7 +35,7 @@ function beacon_render_dashboard(): void
     foreach ($data['series'] as $row) {
         $max_day = max($max_day, (int) $row['views']);
     }
-    $ranges = ['1d' => __('24h', 'beacon-analytics'), '7d' => __('7 days', 'beacon-analytics'), '30d' => __('30 days', 'beacon-analytics'), '90d' => __('90 days', 'beacon-analytics')];
+    $ranges = ['1d' => __('24h', 'beacon-analytics'), '7d' => __('7 days', 'beacon-analytics'), '30d' => __('30 days', 'beacon-analytics'), '90d' => __('90 days', 'beacon-analytics'), 'all' => __('All time', 'beacon-analytics')];
     $base   = admin_url('admin.php?page=beacon-analytics');
     ?>
     <div class="wrap beacon-wrap" id="beacon-app">
@@ -57,6 +57,13 @@ function beacon_render_dashboard(): void
           )); ?>">
             <span class="dashicons dashicons-download" aria-hidden="true"></span>
             <?php esc_html_e('Export CSV', 'beacon-analytics'); ?>
+          </a>
+          <a class="beacon-btn" href="<?php echo esc_url(wp_nonce_url(
+              admin_url('admin-post.php?action=beacon_export_xlsx&range=' . $range),
+              'beacon_export_xlsx'
+          )); ?>">
+            <span class="dashicons dashicons-media-spreadsheet" aria-hidden="true"></span>
+            <?php esc_html_e('Export Excel', 'beacon-analytics'); ?>
           </a>
           <button type="button" id="beacon-print" class="beacon-btn">
             <span class="dashicons dashicons-printer" aria-hidden="true"></span>

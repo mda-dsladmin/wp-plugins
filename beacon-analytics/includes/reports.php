@@ -88,7 +88,9 @@ function beacon_report_sections(string $range, array $content): array
         'headers' => [],
         'rows'    => [
             [__('Site', 'beacon-analytics'), home_url('/')],
-            [__('Period', 'beacon-analytics'), sprintf(/* translators: %d: days */ __('Last %d days', 'beacon-analytics'), $days)],
+            [__('Period', 'beacon-analytics'), $range === 'all'
+                ? __('All time (everything still stored)', 'beacon-analytics')
+                : sprintf(/* translators: %d: days */ __('Last %d days', 'beacon-analytics'), $days)],
             [__('Generated', 'beacon-analytics'), wp_date('Y-m-d H:i')],
         ],
     ];
@@ -101,6 +103,11 @@ function beacon_report_sections(string $range, array $content): array
         $sections[] = ['title' => __('Pageviews by day', 'beacon-analytics'),
             'headers' => [__('Day', 'beacon-analytics'), __('Views', 'beacon-analytics')],
             'rows' => array_map(fn($r) => [$r['day'], (int) $r['views']], $d['series'])];
+        $pivot = beacon_get_entry_link_series($range);
+        if ($pivot) {
+            $sections[] = ['title' => __('Pageviews by entry link', 'beacon-analytics'),
+                'headers' => $pivot['headers'], 'rows' => $pivot['rows']];
+        }
         $simple = [
             [__('Top pages', 'beacon-analytics'),    __('Path', 'beacon-analytics'),    __('Views', 'beacon-analytics'),    $d['top_pages']],
             [__('Entry pages', 'beacon-analytics'),  __('Path', 'beacon-analytics'),    __('Sessions', 'beacon-analytics'), $d['entries']],

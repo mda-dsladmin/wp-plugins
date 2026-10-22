@@ -16,8 +16,9 @@
   var endpoint = script.getAttribute('data-endpoint');
   if (!site || !endpoint) return;
 
-  // Per-tab session id (memory only, cleared when the tab closes). Not a
-  // cookie, not stored, not durable across tabs.
+  // Page-load id (memory only, gone on the next navigation). Not a cookie,
+  // nothing stored on the device. Visits are stitched on the SERVER from
+  // the daily visitor hash + a 30-minute inactivity window.
   var sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   /*
