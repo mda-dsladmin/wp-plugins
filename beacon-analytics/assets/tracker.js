@@ -200,12 +200,14 @@
           try {
             var hit = e.target.closest && e.target.closest(r.selector);
             if (!hit) return;
-            // Inside a survey wrapper the change-based capture owns FORM
-            // CONTROLS — a click rule must not double-fire on an answer. But
-            // buttons and links in the form (Calculate, Reset) still count.
+            // Inside a survey wrapper the change-based capture owns ANSWER
+            // controls — a click rule must not double-fire on an answer. But
+            // buttons in the form (Calculate, Reset, Print) still count, and
+            // that includes button-style inputs like
+            // <input type="button" value="Print Your Preferences">.
             if (typeof window.BeaconSurvey === 'string' && window.BeaconSurvey
                 && e.target.closest(window.BeaconSurvey)
-                && e.target.closest('input,select,textarea,label')) return;
+                && e.target.closest('input:not([type="button"]):not([type="submit"]):not([type="reset"]),select,textarea,label')) return;
             var control = e.target.closest(INTERACTIVE);
             if (!control) return; // dead-space misclick: not an event
             var lbl = labelFor(hit) || labelFor(control);
