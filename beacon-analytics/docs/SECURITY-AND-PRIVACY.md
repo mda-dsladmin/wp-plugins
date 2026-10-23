@@ -295,3 +295,14 @@ prohibit it), the Collector URL setting must point at a Beacon install on
 a host that does. Retention should be set to purge shortly after the
 study ends. Exports, email reports, and Journeys contain the codes while
 the data exists.
+
+## Update checks (v1.20.0)
+
+Beacon checks for its own updates at api.github.com (the configured
+repo's Releases list, default mda-dsladmin/wp-plugins) and downloads
+update zips from github.com. These requests carry no visitor data: only
+the plugin version in the User-Agent and, if one is saved, a read-only
+GitHub token. Only a .zip attached to a published release of the
+configured repo is accepted (download URL must be https://github.com/
+<repo>/releases/download/...). With the repo setting blank, the older
+self-hosted folder (envsnstudios.com/plugins/) is used instead.

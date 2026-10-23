@@ -254,3 +254,14 @@ stored, which the retention setting bounds (7 to 730 days).
   answered all. Changing an answer does not count twice. The question
   count is the number of distinct questions anyone answered in the
   period, so early on it can be lower than the page's real item count.
+
+## Updates from GitHub Releases (v1.20.0)
+
+Settings > Updates holds the GitHub repo (default
+mda-dsladmin/wp-plugins). Beacon looks at the repo's published Releases
+for an attached .zip with "beacon-analytics" in its name and offers the
+highest version as a normal WordPress update. Tags can be v1.20.0 or
+beacon-analytics-v1.20.0; the version can also come from the asset name.
+Other plugins' releases in the same repo are ignored. "Check for updates"
+on the Plugins screen forces a fresh check and shows the reason if it
+fails. Clear the repo field to fall back to the self-hosted folder.

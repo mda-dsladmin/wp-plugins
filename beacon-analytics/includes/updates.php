@@ -35,9 +35,8 @@ const BEACON_UPDATE_HOST = 'envsnstudios.com';
 const BEACON_UPDATE_BASE = 'https://envsnstudios.com/plugins/';
 
 /**
- * Ask the update server for the latest release info.
- * Tries update.php first (reads the zip, always current), then the static
- * manifest.json fallback for hosts that cannot run PHP in that folder.
+ * Latest release info, from GitHub Releases (default) or the legacy
+ * self-hosted folder (when the repo setting is blank).
  *
  * @return array{version:string,package:string}|null Extra keys pass through.
  */
@@ -47,12 +46,121 @@ function beacon_update_fetch_info(): ?array
     if (is_array($cached)) {
         return isset($cached['version']) ? $cached : null; // ['none'] = miss
     }
+    delete_site_transient('beacon_update_error');
 
+    $repo = (string) beacon_settings()['update_repo'];
+    $data = $repo !== '' ? beacon_update_from_github($repo) : beacon_update_from_folder();
+
+    if ($data !== null) {
+        set_site_transient('beacon_update_info', $data, 6 * HOUR_IN_SECONDS);
+        return $data;
+    }
+    // Unreachable or nothing usable: remember the miss for an hour so admin
+    // pages stay fast. The "Check for updates" link clears it.
+    set_site_transient('beacon_update_info', ['none' => 1], HOUR_IN_SECONDS);
+    return null;
+}
+
+/** Remember why the last check failed, for the Plugins screen notice. */
+function beacon_update_fail(string $why): void
+{
+    set_site_transient('beacon_update_error', $why, HOUR_IN_SECONDS);
+}
+
+/**
+ * GitHub Releases. Works with a repo that holds several plugins: it scans
+ * recent published releases (no drafts or pre-releases) for an attached
+ * .zip whose name contains "beacon-analytics", and takes the highest
+ * version. The version comes from the tag (v1.19.0, beacon-analytics-v1.19.0,
+ * ...), else the asset name, else the release title.
+ */
+function beacon_update_from_github(string $repo): ?array
+{
+    $headers = [
+        'Accept'               => 'application/vnd.github+json',
+        'X-GitHub-Api-Version' => '2022-11-28',
+        'User-Agent'           => 'Beacon-Analytics/' . BEACON_VERSION, // GitHub requires one
+    ];
+    $token = (string) beacon_settings()['update_token'];
+    if ($token !== '') {
+        $headers['Authorization'] = 'Bearer ' . $token; // optional: lifts the 60/hour limit
+    }
+    $res = wp_remote_get('https://api.github.com/repos/' . $repo . '/releases?per_page=30', [
+        'timeout' => 10,
+        'headers' => $headers,
+    ]);
+    if (is_wp_error($res)) {
+        beacon_update_fail(sprintf('GitHub could not be reached (%s).', $res->get_error_message()));
+        return null;
+    }
+    $code = (int) wp_remote_retrieve_response_code($res);
+    if ($code === 404) {
+        beacon_update_fail(sprintf('GitHub says the repo "%s" does not exist or is private.', $repo));
+        return null;
+    }
+    if ($code === 403 || $code === 429) {
+        beacon_update_fail('GitHub rate limit reached (60 checks per hour per server, shared with other sites on the same host). Wait an hour, or add a GitHub token in Beacon settings.');
+        return null;
+    }
+    if ($code !== 200) {
+        beacon_update_fail(sprintf('GitHub answered with HTTP %d.', $code));
+        return null;
+    }
+    $releases = json_decode((string) wp_remote_retrieve_body($res), true);
+    if (!is_array($releases)) {
+        beacon_update_fail('GitHub sent an unreadable answer.');
+        return null;
+    }
+
+    $best = null;
+    $repo_path = '/' . strtolower($repo) . '/releases/download/';
+    foreach ($releases as $rel) {
+        if (!is_array($rel) || !empty($rel['draft']) || !empty($rel['prerelease'])) {
+            continue;
+        }
+        $asset = null;
+        foreach ((array) ($rel['assets'] ?? []) as $a) {
+            $name = strtolower((string) ($a['name'] ?? ''));
+            $url  = (string) ($a['browser_download_url'] ?? '');
+            if (str_ends_with($name, '.zip') && str_contains($name, 'beacon-analytics')
+                && str_starts_with($url, 'https://github.com/')
+                && str_starts_with(strtolower((string) wp_parse_url($url, PHP_URL_PATH)), $repo_path)) {
+                $asset = ['name' => $name, 'url' => $url];
+                break;
+            }
+        }
+        if ($asset === null) {
+            continue; // another plugin's release, or no zip attached
+        }
+        $version = '';
+        foreach ([(string) ($rel['tag_name'] ?? ''), $asset['name'], (string) ($rel['name'] ?? '')] as $src) {
+            if (preg_match('/(\d+\.\d+(?:\.\d+)?)/', $src, $m)) {
+                $version = $m[1];
+                break;
+            }
+        }
+        if ($version === '' || ($best !== null && !version_compare($version, $best['version'], '>'))) {
+            continue;
+        }
+        $best = [
+            'version'      => $version,
+            'package'      => $asset['url'],
+            'url'          => (string) ($rel['html_url'] ?? 'https://github.com/' . $repo . '/releases'),
+            'last_updated' => (string) ($rel['published_at'] ?? ''),
+            'changelog'    => (string) ($rel['body'] ?? ''),
+        ];
+    }
+    if ($best === null) {
+        beacon_update_fail(sprintf('No published release in %s has a .zip attached with "beacon-analytics" in its name.', $repo));
+    }
+    return $best;
+}
+
+/** Legacy source: update.php, then manifest.json, in the self-hosted folder. */
+function beacon_update_from_folder(): ?array
+{
     foreach ([BEACON_UPDATE_BASE . 'update.php', BEACON_UPDATE_BASE . 'manifest.json'] as $url) {
-        $res = wp_remote_get($url, [
-            'timeout' => 10,
-            'headers' => ['Accept' => 'application/json'],
-        ]);
+        $res = wp_remote_get($url, ['timeout' => 10, 'headers' => ['Accept' => 'application/json']]);
         if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) {
             continue;
         }
@@ -67,15 +175,40 @@ function beacon_update_fetch_info(): ?array
             || !str_starts_with($data['package'], 'https://')) {
             continue;
         }
-        set_site_transient('beacon_update_info', $data, 6 * HOUR_IN_SECONDS);
         return $data;
     }
-
-    // Server unreachable or serving junk: remember the miss for an hour so
-    // admin pages stay fast, then try again.
-    set_site_transient('beacon_update_info', ['none' => 1], HOUR_IN_SECONDS);
+    beacon_update_fail('The self-hosted update folder could not be reached.');
     return null;
 }
+
+/**
+ * Keep the plugin in its own folder when updating. WordPress installs the
+ * zip's top folder as-is, so a release zip whose folder is named anything
+ * else (beacon-analytics-plugin, wp-plugins-main/...) would land in a new
+ * folder and deactivate the plugin. Rename it back before install.
+ */
+add_filter('upgrader_source_selection', function ($source, $remote_source, $upgrader, $hook_extra = []) {
+    if (!is_array($hook_extra) || ($hook_extra['plugin'] ?? '') !== plugin_basename(BEACON_FILE)) {
+        return $source;
+    }
+    $want = trailingslashit($remote_source) . dirname(plugin_basename(BEACON_FILE));
+    if (untrailingslashit($source) === $want) {
+        return $source;
+    }
+    // Monorepo-style zip: the plugin can sit one folder deeper.
+    $main = basename(BEACON_FILE);
+    if (!file_exists(trailingslashit($source) . $main) && file_exists(trailingslashit($source) . 'beacon-analytics/' . $main)) {
+        $source = trailingslashit($source) . 'beacon-analytics';
+    }
+    if (!file_exists(trailingslashit($source) . $main)) {
+        return new WP_Error('beacon_bad_zip', 'The release zip does not contain beacon-analytics.php.');
+    }
+    global $wp_filesystem;
+    if ($wp_filesystem && $wp_filesystem->move(untrailingslashit($source), $want, true)) {
+        return trailingslashit($want);
+    }
+    return new WP_Error('beacon_rename_failed', 'Could not move the update into the beacon-analytics folder.');
+}, 10, 4);
 
 // The update check itself. Core extracts the hostname from the Update URI
 // header and fires this filter; whatever we return (with a newer version)
@@ -130,7 +263,7 @@ add_filter('plugins_api', function ($result, $action, $args) {
         'download_link' => $info['package'] ?? '',
         'sections'      => [
             'description' => '<p>Self-hosted, privacy-first analytics that live entirely inside this WordPress site. Updates are served from ' . esc_html(BEACON_UPDATE_HOST) . '.</p>',
-            'changelog'   => $changelog !== '' ? wp_kses_post($changelog) : '<p>See the release notes shipped with each version.</p>',
+            'changelog'   => $changelog !== '' ? wpautop(esc_html($changelog)) : '<p>See the release notes shipped with each version.</p>',
         ],
     ];
 }, 10, 3);
@@ -190,7 +323,8 @@ add_action('admin_notices', function (): void {
         $text = sprintf(/* translators: %s: installed version */ __('Beacon is up to date (%s).', 'beacon-analytics'), BEACON_VERSION);
     } elseif ($state === 'unreachable') {
         $cls  = 'notice-error';
-        $text = __('Could not reach the Beacon update server. Check that update.php or manifest.json is online, then try again.', 'beacon-analytics');
+        $why  = get_site_transient('beacon_update_error');
+        $text = __('Beacon could not check for updates.', 'beacon-analytics') . ' ' . (is_string($why) ? $why : '');
     } else {
         return;
     }

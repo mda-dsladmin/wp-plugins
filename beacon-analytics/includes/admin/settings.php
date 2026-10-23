@@ -113,6 +113,20 @@ function beacon_sanitize_settings($input): array
         ))),
         'report_format'        => in_array($input['report_format'] ?? '', ['xlsx', 'pdf', 'csv'], true)
             ? $input['report_format'] : 'xlsx',
+        // GitHub repo for updates: strict owner/repo or blank.
+        'update_repo'          => preg_match('#^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$#', trim((string) ($input['update_repo'] ?? '')))
+            ? trim((string) $input['update_repo']) : '',
+        // Token: left blank on save = keep the saved one; "clear" removes it.
+        'update_token'         => (static function () use ($input, $current) {
+            $t = trim((string) ($input['update_token'] ?? ''));
+            if ($t === '') {
+                return (string) $current['update_token'];
+            }
+            if (strtolower($t) === 'clear') {
+                return '';
+            }
+            return preg_match('/^[A-Za-z0-9_]{20,255}$/', $t) ? $t : (string) $current['update_token'];
+        })(),
         // Study code field: ONE input id, letters/digits/dash/underscore.
         'study_field'          => substr(preg_replace('/[^a-zA-Z0-9_\-]/', '',
             ltrim(trim((string) ($input['study_field'] ?? '')), '#')), 0, 60),
@@ -499,6 +513,29 @@ function beacon_render_settings(): void
                       placeholder="cutting-edge cure | serious | Banned marketing claim"><?php echo esc_textarea($o['scan_policy_rules']); ?></textarea>
             <p id="beacon_policy_help" class="beacon-help">
               <?php esc_html_e('Format: pattern | severity | message. Severity: critical, serious, moderate, or minor. Wrap the pattern in /slashes/ for regex. A rule is a pattern and a message only — no URLs, no scripts, same guardrail as tags.', 'beacon-analytics'); ?>
+            </p>
+          </div>
+        </section>
+
+        <section class="beacon-card">
+          <h2><?php esc_html_e('Updates', 'beacon-analytics'); ?></h2>
+          <div class="beacon-field">
+            <label for="beacon_update_repo"><?php esc_html_e('GitHub repo (owner/repo)', 'beacon-analytics'); ?></label>
+            <input name="<?php echo esc_attr($name); ?>[update_repo]" id="beacon_update_repo" type="text"
+                   class="beacon-input beacon-code" value="<?php echo esc_attr($o['update_repo']); ?>"
+                   placeholder="mda-dsladmin/wp-plugins" aria-describedby="beacon_update_repo_help">
+            <p id="beacon_update_repo_help" class="beacon-help">
+              <?php esc_html_e('Beacon checks this repo\'s published Releases for an attached .zip with "beacon-analytics" in its name, and offers it as an update when its version is newer. Drafts and pre-releases are ignored. Leave blank to use the old self-hosted update folder instead. Force a check any time with "Check for updates" on the Plugins screen.', 'beacon-analytics'); ?>
+            </p>
+          </div>
+          <div class="beacon-field">
+            <label for="beacon_update_token"><?php esc_html_e('GitHub token (optional)', 'beacon-analytics'); ?></label>
+            <input name="<?php echo esc_attr($name); ?>[update_token]" id="beacon_update_token" type="password"
+                   class="beacon-input beacon-code" value="" autocomplete="off"
+                   placeholder="<?php echo esc_attr($o['update_token'] !== '' ? __('Saved (leave blank to keep, type clear to remove)', 'beacon-analytics') : __('Not set', 'beacon-analytics')); ?>"
+                   aria-describedby="beacon_update_token_help">
+            <p id="beacon_update_token_help" class="beacon-help">
+              <?php esc_html_e('Not needed for a public repo. GitHub allows 60 unauthenticated checks per hour per server IP, and shared hosting can use those up. A fine-grained token with read-only Contents access lifts the limit. It is never shown again after saving.', 'beacon-analytics'); ?>
             </p>
           </div>
         </section>
