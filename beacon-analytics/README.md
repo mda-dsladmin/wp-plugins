@@ -240,3 +240,17 @@ emailed reports). Reports include "Pageviews by entry link": pageviews per
 day, split by the entry link each visit started on, for entry links with an
 allow-listed query key (like /?sl=gyn). "All time" covers everything still
 stored, which the retention setting bounds (7 to 730 days).
+
+## Report tables added in v1.19.0
+
+- Event totals: how many times each tag event fired (engaged_60s,
+  scroll_75, print_preferences, video_click, ...) and in how many visits.
+  Event details splits the same counts by label (which video, which
+  button). Survey answers, study codes, and outbound clicks have their
+  own tables, so they are left out here.
+- Survey completion: for each page with recorded answers, the number of
+  questions, visits to the page, and visits that answered at least one,
+  at least half, and all of them, plus the percent of visits that
+  answered all. Changing an answer does not count twice. The question
+  count is the number of distinct questions anyone answered in the
+  period, so early on it can be lower than the page's real item count.

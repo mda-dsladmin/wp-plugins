@@ -149,6 +149,33 @@ function beacon_report_sections(string $range, array $content): array
                 'headers' => [__('Question → Answer', 'beacon-analytics'), __('Responses', 'beacon-analytics')],
                 'rows' => array_map('array_values', $survey)];
         }
+
+        // How far visitors got through each page's questions.
+        $comp = beacon_get_survey_completion($range);
+        if ($comp) {
+            $sections[] = ['title' => __('Survey completion', 'beacon-analytics'),
+                // Short headers so the PDF columns fit: visits to the page,
+                // visits that answered 1+ / half+ / all questions, % all.
+                'headers' => [__('Questions', 'beacon-analytics'), __('Visits', 'beacon-analytics'),
+                    __('1+', 'beacon-analytics'), __('Half+', 'beacon-analytics'),
+                    __('All', 'beacon-analytics'), __('Done %', 'beacon-analytics'),
+                    __('Page', 'beacon-analytics')],
+                'rows' => array_map(static fn($c) => [$c['questions'], $c['visits'], $c['one'], $c['half'],
+                    $c['all'], $c['rate'], $c['path']], $comp)];
+        }
+
+        // Milestones and tagged clicks: how often each fired, in how many visits.
+        $ev = beacon_get_event_totals($range);
+        if ($ev['totals']) {
+            $sections[] = ['title' => __('Event totals', 'beacon-analytics'),
+                'headers' => [__('Event', 'beacon-analytics'), __('Times', 'beacon-analytics'), __('Visits', 'beacon-analytics')],
+                'rows' => array_map(static fn($e) => [(string) $e['event_name'], (int) $e['fires'], (int) $e['visits']], $ev['totals'])];
+            $sections[] = ['title' => __('Event details', 'beacon-analytics'),
+                'headers' => [__('Event', 'beacon-analytics'), __('Times', 'beacon-analytics'),
+                    __('Visits', 'beacon-analytics'), __('Label', 'beacon-analytics')],
+                'rows' => array_map(static fn($e) => [(string) $e['event_name'], (int) $e['fires'],
+                    (int) $e['visits'], (string) $e['label']], $ev['details'])];
+        }
     }
 
     if (in_array('funnels', $content, true)) {

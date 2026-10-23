@@ -513,3 +513,116 @@ function beacon_get_entry_link_series(string $range, int $max_cols = 25): array
     }
     return ['headers' => $headers, 'rows' => $out];
 }
+
+/**
+ * Custom event totals (tag rules, iframeclick, window.beacon calls) for the
+ * range: how many times each fired and in how many visits. Outbound clicks
+ * (Exit URLs), survey answers, and study codes have their own tables.
+ *
+ * @return array{totals: array, details: array}
+ */
+function beacon_get_event_totals(string $range, int $limit = 200): array
+{
+    global $wpdb;
+    $table = beacon_table();
+    $since = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
+    $lim   = (int) max(1, min(500, $limit));
+
+    $totals = $wpdb->get_results($wpdb->prepare(
+        "SELECT event_name, COUNT(*) AS fires, COUNT(DISTINCT session_id) AS visits
+         FROM {$table}
+         WHERE event_type = 'event' AND created_at >= %s
+           AND event_name NOT IN ('survey_response', 'study_code')
+         GROUP BY event_name ORDER BY fires DESC LIMIT {$lim}",
+        $since
+    ), ARRAY_A);
+
+    $details = $wpdb->get_results($wpdb->prepare(
+        "SELECT event_name, COALESCE(event_label, '') AS label, COUNT(*) AS fires,
+                COUNT(DISTINCT session_id) AS visits
+         FROM {$table}
+         WHERE event_type = 'event' AND created_at >= %s
+           AND event_name NOT IN ('survey_response', 'study_code')
+         GROUP BY event_name, label ORDER BY fires DESC LIMIT {$lim}",
+        $since
+    ), ARRAY_A);
+
+    return ['totals' => $totals, 'details' => $details];
+}
+
+/**
+ * Survey completion per page. For every page where answers were recorded:
+ *  - questions = distinct questions anyone answered on that page in the
+ *    range (the text before " → " in each survey_response label)
+ *  - visits to the page, and visits that answered at least one, at least
+ *    half, and all of those questions
+ * Changing an answer does not count twice: a visit's progress is the number
+ * of DISTINCT questions it answered on that page. A question nobody
+ * answered in the range is not counted, so a page's question total can be
+ * lower than its real item count early on.
+ */
+function beacon_get_survey_completion(string $range): array
+{
+    global $wpdb;
+    $table = beacon_table();
+    $since = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
+
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT path, session_id, event_label
+         FROM {$table}
+         WHERE event_name = 'survey_response' AND event_label IS NOT NULL
+           AND session_id IS NOT NULL AND created_at >= %s
+         ORDER BY id DESC LIMIT 50000",
+        $since
+    ), ARRAY_A);
+    if (!$rows) {
+        return [];
+    }
+
+    $questions = [];  // path => [question => true]
+    $answered  = [];  // path => [session => [question => true]]
+    foreach ($rows as $r) {
+        $parts = explode(' → ', (string) $r['event_label'], 2);
+        $q     = trim($parts[0]);
+        if ($q === '') {
+            continue;
+        }
+        $questions[$r['path']][$q] = true;
+        $answered[$r['path']][$r['session_id']][$q] = true;
+    }
+
+    $out = [];
+    foreach ($questions as $path => $qs) {
+        $n    = count($qs);
+        $half = (int) ceil($n / 2);
+        $one = $halfplus = $all = 0;
+        foreach ($answered[$path] as $sess_qs) {
+            $c = count($sess_qs);
+            $one++;
+            if ($c >= $half) {
+                $halfplus++;
+            }
+            if ($c >= $n) {
+                $all++;
+            }
+        }
+        $visits = (int) $wpdb->get_var($wpdb->prepare(
+            "SELECT COUNT(DISTINCT session_id) FROM {$table}
+             WHERE event_type = 'pageview' AND path = %s AND session_id IS NOT NULL AND created_at >= %s",
+            $path,
+            $since
+        ));
+        $visits = max($visits, $one); // the page view can fall just before the range start
+        $out[] = [
+            'path'      => (string) $path,
+            'questions' => $n,
+            'visits'    => $visits,
+            'one'       => $one,
+            'half'      => $halfplus,
+            'all'       => $all,
+            'rate'      => $visits > 0 ? round(100 * $all / $visits, 1) : 0.0,
+        ];
+    }
+    usort($out, static fn($a, $b) => $b['visits'] <=> $a['visits']);
+    return $out;
+}
