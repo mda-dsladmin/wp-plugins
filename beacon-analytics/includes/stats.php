@@ -234,19 +234,40 @@ function beacon_get_summary(string $range, int $limit = 10): array
  * Optional entry-path prefix filter ("/news" matches /news and /news/...)
  * and pagination so every visit in the retention window is reachable.
  */
-function beacon_get_sessions(string $range, string $entry = '', int $page = 1, int $per_page = 50): array
+/**
+ * WHERE fragment + params for the Journeys filters on the entry hit (fe):
+ *  - $entry: entry page starts with (path, query included)
+ *  - $query: entry query contains; only visits that ARRIVED with a query
+ *    string match (e.g. "sl=brst", "brst", or "?sl=" all work)
+ *
+ * @return array{0:string,1:array}
+ */
+function beacon_entry_filter_sql(string $entry, string $query): array
+{
+    global $wpdb;
+    $sql    = '';
+    $params = [];
+    if ($entry !== '') {
+        $sql     .= ' AND fe.path LIKE %s';
+        $params[] = $wpdb->esc_like($entry) . '%';
+    }
+    $query = ltrim($query, '?');
+    if ($query !== '') {
+        $sql     .= ' AND fe.path LIKE %s';
+        $params[] = '%' . $wpdb->esc_like('?') . '%' . $wpdb->esc_like($query) . '%';
+    }
+    return [$sql, $params];
+}
+
+function beacon_get_sessions(string $range, string $entry = '', int $page = 1, int $per_page = 50, string $query = ''): array
 {
     global $wpdb;
     $table  = beacon_table();
     $since  = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
     $offset = max(0, ($page - 1)) * $per_page;
 
-    $entry_sql = '';
-    $params    = [$since, $since, $since];
-    if ($entry !== '') {
-        $entry_sql = ' AND fe.path LIKE %s';
-        $params[]  = $wpdb->esc_like($entry) . '%';
-    }
+    [$entry_sql, $fparams] = beacon_entry_filter_sql($entry, $query);
+    $params   = array_merge([$since, $since, $since], $fparams);
     $params[] = $per_page;
     $params[] = $offset;
 
@@ -279,19 +300,20 @@ function beacon_get_sessions(string $range, string $entry = '', int $page = 1, i
 /**
  * How many sessions match the range + entry filter (for the pager).
  */
-function beacon_count_sessions(string $range, string $entry = ''): int
+function beacon_count_sessions(string $range, string $entry = '', string $query = ''): int
 {
     global $wpdb;
     $table = beacon_table();
     $since = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
 
-    if ($entry === '') {
+    if ($entry === '' && ltrim($query, '?') === '') {
         return (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(DISTINCT session_id) FROM {$table}
              WHERE session_id IS NOT NULL AND created_at >= %s",
             $since
         ));
     }
+    [$filter_sql, $fparams] = beacon_entry_filter_sql($entry, $query);
     return (int) $wpdb->get_var($wpdb->prepare(
         "SELECT COUNT(*) FROM (
             SELECT fm.session_id
@@ -299,11 +321,19 @@ function beacon_count_sessions(string $range, string $entry = ''): int
                   WHERE session_id IS NOT NULL AND created_at >= %s
                   GROUP BY session_id) fm
             JOIN {$table} fe ON fe.id = fm.mid
-            WHERE fe.path LIKE %s
+            WHERE 1=1{$filter_sql}
          ) c",
-        $since,
-        $wpdb->esc_like($entry) . '%'
+        ...array_merge([$since], $fparams)
     ));
+}
+
+/**
+ * Split a stored path into [page, query]: "/?sl=brst" -> ["/", "?sl=brst"].
+ */
+function beacon_split_path(string $path): array
+{
+    $i = strpos($path, '?');
+    return $i === false ? [$path, ''] : [substr($path, 0, $i), substr($path, $i)];
 }
 
 /**

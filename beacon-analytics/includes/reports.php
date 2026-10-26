@@ -241,7 +241,7 @@ function beacon_report_journey_sections(string $range): array
         $head[] = __('Study code', 'beacon-analytics');
     }
     array_push($head, __('Pages', 'beacon-analytics'), __('Events', 'beacon-analytics'),
-        __('Length (s)', 'beacon-analytics'), __('Entry page', 'beacon-analytics'));
+        __('Length (s)', 'beacon-analytics'), __('Entry query', 'beacon-analytics'), __('Entry page', 'beacon-analytics'));
 
     $rows = [];
     foreach ($sessions as $s) {
@@ -254,7 +254,8 @@ function beacon_report_journey_sections(string $range): array
         }
         array_push($row, (int) $s['pageviews'], (int) $s['events'],
             max(0, strtotime((string) $s['ended']) - strtotime((string) $s['started'])),
-            (string) $s['entry_path']);
+            beacon_split_path((string) $s['entry_path'])[1],
+            beacon_split_path((string) $s['entry_path'])[0]);
         $rows[] = $row;
     }
     $out[] = ['title' => __('Journeys: sessions (most recent 200)', 'beacon-analytics'),

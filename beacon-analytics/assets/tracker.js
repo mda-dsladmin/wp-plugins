@@ -21,6 +21,12 @@
   // the daily visitor hash + a 30-minute inactivity window.
   var sid = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
+  // The URL as the visitor LANDED, read the moment this script runs. The
+  // pageview is sent after the page finishes loading, and by then some
+  // themes have already removed the query (?sl=...) with history
+  // .replaceState; reading it here keeps it.
+  var landingUrl = location.pathname + location.search;
+
   /*
    * Device context, deliberately COARSE so it can never fingerprint:
    *  - screen width is bucketed client-side (exact pixels never leave)
@@ -86,7 +92,7 @@
       type: 'pageview',
       // Path plus query. The collector strips the whole query except the keys
       // the admin allow-listed in settings, before anything is stored.
-      url: location.pathname + location.search,
+      url: landingUrl,
       title: document.title,
       ref: document.referrer || '',
       sb: sb,

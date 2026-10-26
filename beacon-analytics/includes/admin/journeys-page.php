@@ -29,6 +29,9 @@ function beacon_render_journeys(): void
     // Entry-path filter + pager (both survive in the URL, so views are shareable).
     $entry = isset($_GET['entry']) ? sanitize_text_field(wp_unslash($_GET['entry'])) : '';
     $entry = mb_substr(preg_replace('/[<>"\']/', '', $entry), 0, 100);
+    // Entry-query filter ("sl=brst"): only visits that arrived with a query.
+    $eq    = isset($_GET['eq']) ? sanitize_text_field(wp_unslash($_GET['eq'])) : '';
+    $eq    = mb_substr(preg_replace('/[<>"\']/', '', $eq), 0, 100);
     $pg    = isset($_GET['pg']) ? max(1, (int) $_GET['pg']) : 1;
 
     $base = admin_url('admin.php?page=beacon-journeys');
@@ -52,9 +55,9 @@ function beacon_render_journeys(): void
       </header>
 
       <?php if ($session !== '') : ?>
-        <?php beacon_journeys_detail($session, $base, $range, $entry, $pg); ?>
+        <?php beacon_journeys_detail($session, $base, $range, $entry, $pg, $eq); ?>
       <?php else : ?>
-        <?php beacon_journeys_list($base, $range, $entry, $pg); ?>
+        <?php beacon_journeys_list($base, $range, $entry, $pg, $eq); ?>
       <?php endif; ?>
     </div>
     <?php
@@ -63,14 +66,14 @@ function beacon_render_journeys(): void
 /**
  * The session list plus funnels, with entry filter and pager.
  */
-function beacon_journeys_list(string $base, string $range, string $entry, int $pg): void
+function beacon_journeys_list(string $base, string $range, string $entry, int $pg, string $eq = ''): void
 {
     $per_page = 50;
     $ranges   = ['1d' => __('24h', 'beacon-analytics'), '7d' => __('7 days', 'beacon-analytics'), '30d' => __('30 days', 'beacon-analytics'), 'all' => __('All time', 'beacon-analytics')];
-    $total    = beacon_count_sessions($range, $entry);
+    $total    = beacon_count_sessions($range, $entry, $eq);
     $pages    = max(1, (int) ceil($total / $per_page));
     $pg       = min($pg, $pages);
-    $sessions = beacon_get_sessions($range, $entry, $pg, $per_page);
+    $sessions = beacon_get_sessions($range, $entry, $pg, $per_page, $eq);
     $funnels  = beacon_eval_funnels(
         beacon_parse_funnels((string) beacon_settings()['funnels']),
         $range
@@ -79,7 +82,7 @@ function beacon_journeys_list(string $base, string $range, string $entry, int $p
     <nav class="beacon-ranges" aria-label="<?php esc_attr_e('Date range', 'beacon-analytics'); ?>">
       <?php foreach ($ranges as $r => $label) : $on = ($r === $range); ?>
         <a class="beacon-chip<?php echo $on ? ' is-on' : ''; ?>"
-           href="<?php echo esc_url(add_query_arg(['range' => $r, 'entry' => $entry], $base)); ?>"
+           href="<?php echo esc_url(add_query_arg(['range' => $r, 'entry' => $entry, 'eq' => $eq], $base)); ?>"
            <?php echo $on ? 'aria-current="page"' : ''; ?>><?php echo esc_html($label); ?></a>
       <?php endforeach; ?>
     </nav>
@@ -134,8 +137,11 @@ function beacon_journeys_list(string $base, string $range, string $entry, int $p
         <label for="beacon_entry"><?php esc_html_e('Entry page starts with', 'beacon-analytics'); ?></label>
         <input type="text" id="beacon_entry" name="entry" class="beacon-input beacon-code"
                style="max-width:16rem" value="<?php echo esc_attr($entry); ?>" placeholder="/landing">
+        <label for="beacon_eq"><?php esc_html_e('Entry query contains', 'beacon-analytics'); ?></label>
+        <input type="text" id="beacon_eq" name="eq" class="beacon-input beacon-code"
+               style="max-width:12rem" value="<?php echo esc_attr($eq); ?>" placeholder="sl=brst">
         <button type="submit" class="beacon-btn"><?php esc_html_e('Filter', 'beacon-analytics'); ?></button>
-        <?php if ($entry !== '') : ?>
+        <?php if ($entry !== '' || $eq !== '') : ?>
           <a class="beacon-btn" href="<?php echo esc_url(add_query_arg('range', $range, $base)); ?>"><?php esc_html_e('Clear', 'beacon-analytics'); ?></a>
         <?php endif; ?>
       </form>
@@ -163,6 +169,7 @@ function beacon_journeys_list(string $base, string $range, string $entry, int $p
                 <th scope="col"><?php esc_html_e('Study code', 'beacon-analytics'); ?></th>
               <?php endif; ?>
               <th scope="col"><?php esc_html_e('Entry page', 'beacon-analytics'); ?></th>
+              <th scope="col"><?php esc_html_e('Entry query', 'beacon-analytics'); ?></th>
               <th scope="col" class="beacon-num"><?php esc_html_e('Pages', 'beacon-analytics'); ?></th>
               <th scope="col" class="beacon-num"><?php esc_html_e('Events', 'beacon-analytics'); ?></th>
               <th scope="col" class="beacon-num"><?php esc_html_e('Length', 'beacon-analytics'); ?></th>
@@ -181,12 +188,16 @@ function beacon_journeys_list(string $base, string $range, string $entry, int $p
                       ? '<code>' . esc_html((string) $s['study_code']) . '</code>'
                       : '<span class="beacon-muted">—</span>'; ?></td>
                 <?php endif; ?>
-                <td><?php echo esc_html(mb_substr((string) $s['entry_path'], 0, 50)); ?></td>
+                <?php [$beacon_ep, $beacon_eqs] = beacon_split_path((string) $s['entry_path']); ?>
+                <td><?php echo esc_html(mb_substr($beacon_ep, 0, 50)); ?></td>
+                <td><?php echo $beacon_eqs !== ''
+                    ? '<code>' . esc_html(mb_substr($beacon_eqs, 0, 50)) . '</code>'
+                    : '<span class="beacon-muted">—</span>'; ?></td>
                 <td class="beacon-num"><?php echo (int) $s['pageviews']; ?></td>
                 <td class="beacon-num"><?php echo (int) $s['events']; ?></td>
                 <td class="beacon-num"><?php echo esc_html($len); ?></td>
                 <td>
-                  <a href="<?php echo esc_url(add_query_arg(['session' => $s['session_id'], 'range' => $range, 'entry' => $entry, 'pg' => $pg], $base)); ?>">
+                  <a href="<?php echo esc_url(add_query_arg(['session' => $s['session_id'], 'range' => $range, 'entry' => $entry, 'eq' => $eq, 'pg' => $pg], $base)); ?>">
                     <?php esc_html_e('View steps', 'beacon-analytics'); ?>
                   </a>
                 </td>
@@ -198,13 +209,13 @@ function beacon_journeys_list(string $base, string $range, string $entry, int $p
           <nav class="beacon-ranges" aria-label="<?php esc_attr_e('Session pages', 'beacon-analytics'); ?>" style="margin-top:1rem">
             <?php if ($pg > 1) : ?>
               <a class="beacon-chip beacon-chip-sm"
-                 href="<?php echo esc_url(add_query_arg(['range' => $range, 'entry' => $entry, 'pg' => $pg - 1], $base)); ?>">
+                 href="<?php echo esc_url(add_query_arg(['range' => $range, 'entry' => $entry, 'eq' => $eq, 'pg' => $pg - 1], $base)); ?>">
                 &larr; <?php esc_html_e('Newer', 'beacon-analytics'); ?>
               </a>
             <?php endif; ?>
             <?php if ($pg < $pages) : ?>
               <a class="beacon-chip beacon-chip-sm"
-                 href="<?php echo esc_url(add_query_arg(['range' => $range, 'entry' => $entry, 'pg' => $pg + 1], $base)); ?>">
+                 href="<?php echo esc_url(add_query_arg(['range' => $range, 'entry' => $entry, 'eq' => $eq, 'pg' => $pg + 1], $base)); ?>">
                 <?php esc_html_e('Older', 'beacon-analytics'); ?> &rarr;
               </a>
             <?php endif; ?>
@@ -221,7 +232,7 @@ function beacon_journeys_list(string $base, string $range, string $entry, int $p
 /**
  * One session's ordered steps.
  */
-function beacon_journeys_detail(string $session_id, string $base, string $range, string $entry = '', int $pg = 1): void
+function beacon_journeys_detail(string $session_id, string $base, string $range, string $entry = '', int $pg = 1, string $eq = ''): void
 {
     $steps = beacon_get_session_steps($session_id);
 
@@ -248,7 +259,7 @@ function beacon_journeys_detail(string $session_id, string $base, string $range,
     };
     ?>
     <p>
-      <a class="beacon-btn" href="<?php echo esc_url(add_query_arg(['range' => $range, 'entry' => $entry, 'pg' => $pg], $base)); ?>">
+      <a class="beacon-btn" href="<?php echo esc_url(add_query_arg(['range' => $range, 'entry' => $entry, 'eq' => $eq, 'pg' => $pg], $base)); ?>">
         <span class="dashicons dashicons-arrow-left-alt" aria-hidden="true"></span>
         <?php esc_html_e('All sessions', 'beacon-analytics'); ?>
       </a>
