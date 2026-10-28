@@ -525,7 +525,7 @@ function beacon_render_settings(): void
                    class="beacon-input beacon-code" value="<?php echo esc_attr($o['update_repo']); ?>"
                    placeholder="mda-dsladmin/wp-plugins" aria-describedby="beacon_update_repo_help">
             <p id="beacon_update_repo_help" class="beacon-help">
-              <?php esc_html_e('Beacon checks this repo\'s published Releases for an attached .zip with "beacon-analytics" in its name, and offers it as an update when its version is newer. Drafts and pre-releases are ignored. Leave blank to use the old self-hosted update folder instead. Force a check any time with "Check for updates" on the Plugins screen.', 'beacon-analytics'); ?>
+              <?php esc_html_e('Beacon checks this repo\'s published Releases for an attached .zip with "beacon-analytics" in its name, and offers it as an update when its version is newer. Drafts and pre-releases are ignored. Leave blank to use the default repo (mda-dsladmin/wp-plugins). Force a check any time with "Check for updates" on the Plugins screen.', 'beacon-analytics'); ?>
             </p>
           </div>
           <div class="beacon-field">

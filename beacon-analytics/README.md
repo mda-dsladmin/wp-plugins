@@ -186,14 +186,8 @@ minutes. Data lives in the site's own MySQL database in tables prefixed
 
 ## Updates
 
-The plugin updates itself like any other WordPress plugin. It checks
-`https://envsnstudios.com/plugins/` (declared in the plugin header's
-Update URI line) for a newer release zip, and shows the normal one-click
-update in the Plugins screen when one exists. Downloads are only accepted
-over HTTPS from that exact host. Checks are cached for 6 hours;
-Dashboard > Updates > "Check again" forces a fresh check. Publishing a
-release = dropping the new zip into that folder on the server (see
-update-server/HOW-TO-SET-UP-UPDATES.md in the project files).
+The plugin updates itself like any other WordPress plugin, from GitHub
+Releases (see "Updates from GitHub Releases" below).
 
 ## Email reports
 
@@ -264,4 +258,4 @@ highest version as a normal WordPress update. Tags can be v1.20.0 or
 beacon-analytics-v1.20.0; the version can also come from the asset name.
 Other plugins' releases in the same repo are ignored. "Check for updates"
 on the Plugins screen forces a fresh check and shows the reason if it
-fails. Clear the repo field to fall back to the self-hosted folder.
+fails. A blank repo field uses the default, mda-dsladmin/wp-plugins.

@@ -2,41 +2,35 @@
 declare(strict_types=1);
 
 /**
- * Self-hosted plugin updates.
+ * Plugin updates from GitHub Releases.
  *
- * The plugin header carries "Update URI: https://envsnstudios.com/..." which
+ * The plugin header carries "Update URI: https://github.com/<repo>", which
  * tells WordPress two things: (1) never look for this plugin on wordpress.org
  * (so a same-named directory plugin can't hijack an update), and (2) offer
- * the "update_plugins_envsnstudios.com" filter during update checks. We hook
- * that filter, ask our own update server what the newest version is, and if
- * it is newer than what's installed WordPress shows the normal one-click
- * update in the Plugins screen. Auto-updates work too.
- *
- * The server side is one small file, update.php, sitting in the same folder
- * as the release zips (see update-server/ in the project). Releasing a new
- * version = dropping the new zip in that folder. Nothing else to edit.
+ * the "update_plugins_github.com" filter during update checks. We hook that
+ * filter, read the repo's published Releases, and if one carries a newer
+ * Beacon zip, WordPress shows the normal one-click update on the Plugins
+ * screen. Auto-updates work too.
  *
  * Guardrails:
- *   - The package URL must be HTTPS on the pinned update host, or the
- *     response is ignored. A tampered or misconfigured server cannot point
- *     installs at a zip somewhere else.
- *   - Responses are cached for 6 hours (misses for 1 hour), so the update
- *     host is not hit on every wp-admin page load. The "Check again" button
- *     on Dashboard > Updates bypasses the cache.
+ *   - Only a .zip attached to a published release of the configured repo is
+ *     accepted (https://github.com/<repo>/releases/download/...). A zip from
+ *     any other host or repo is ignored.
+ *   - Responses are cached for 6 hours (misses for 1 hour), so GitHub is not
+ *     hit on every wp-admin page load. "Check for updates" on the Plugins
+ *     screen and "Check again" on Dashboard > Updates bypass the cache.
  */
 
 if (!defined('ABSPATH')) {
     exit;
 }
 
-// The one place the update location is defined. If the hosting folder ever
-// moves, change these two lines and the Update URI line in the plugin header.
-const BEACON_UPDATE_HOST = 'envsnstudios.com';
-const BEACON_UPDATE_BASE = 'https://envsnstudios.com/plugins/';
+// Update URI host (must match the plugin header) and the default repo.
+const BEACON_UPDATE_HOST = 'github.com';
+const BEACON_UPDATE_REPO = 'mda-dsladmin/wp-plugins';
 
 /**
- * Latest release info, from GitHub Releases (default) or the legacy
- * self-hosted folder (when the repo setting is blank).
+ * Latest release info from the configured repo's GitHub Releases.
  *
  * @return array{version:string,package:string}|null Extra keys pass through.
  */
@@ -48,8 +42,8 @@ function beacon_update_fetch_info(): ?array
     }
     delete_site_transient('beacon_update_error');
 
-    $repo = (string) beacon_settings()['update_repo'];
-    $data = $repo !== '' ? beacon_update_from_github($repo) : beacon_update_from_folder();
+    $repo = beacon_update_repo();
+    $data = beacon_update_from_github($repo);
 
     if ($data !== null) {
         set_site_transient('beacon_update_info', $data, 6 * HOUR_IN_SECONDS);
@@ -156,29 +150,11 @@ function beacon_update_from_github(string $repo): ?array
     return $best;
 }
 
-/** Legacy source: update.php, then manifest.json, in the self-hosted folder. */
-function beacon_update_from_folder(): ?array
+/** The repo from settings, or the default when the field is blank. */
+function beacon_update_repo(): string
 {
-    foreach ([BEACON_UPDATE_BASE . 'update.php', BEACON_UPDATE_BASE . 'manifest.json'] as $url) {
-        $res = wp_remote_get($url, ['timeout' => 10, 'headers' => ['Accept' => 'application/json']]);
-        if (is_wp_error($res) || wp_remote_retrieve_response_code($res) !== 200) {
-            continue;
-        }
-        $data = json_decode(wp_remote_retrieve_body($res), true);
-        if (!is_array($data) || empty($data['version']) || empty($data['package'])
-            || !is_string($data['version']) || !is_string($data['package'])) {
-            continue;
-        }
-        // Only install code served over HTTPS from the pinned host.
-        $host = wp_parse_url($data['package'], PHP_URL_HOST);
-        if (!is_string($host) || strtolower($host) !== BEACON_UPDATE_HOST
-            || !str_starts_with($data['package'], 'https://')) {
-            continue;
-        }
-        return $data;
-    }
-    beacon_update_fail('The self-hosted update folder could not be reached.');
-    return null;
+    $repo = (string) beacon_settings()['update_repo'];
+    return $repo !== '' ? $repo : BEACON_UPDATE_REPO;
 }
 
 /**
@@ -215,7 +191,7 @@ add_filter('upgrader_source_selection', function ($source, $remote_source, $upgr
 // becomes the update offer.
 add_filter('update_plugins_' . BEACON_UPDATE_HOST, function ($update, $plugin_data, $plugin_file) {
     if ($plugin_file !== plugin_basename(BEACON_FILE)) {
-        return $update; // some other plugin also updating from this host
+        return $update; // some other plugin also updating from GitHub
     }
     $info = beacon_update_fetch_info();
     if ($info === null || !version_compare($info['version'], BEACON_VERSION, '>')) {
@@ -223,11 +199,11 @@ add_filter('update_plugins_' . BEACON_UPDATE_HOST, function ($update, $plugin_da
                         // but being explicit keeps older cores safe)
     }
     return [
-        'id'           => BEACON_UPDATE_BASE . 'beacon-analytics',
+        'id'           => 'https://github.com/' . beacon_update_repo() . '#beacon-analytics',
         'slug'         => 'beacon-analytics',
         'plugin'       => $plugin_file,
         'version'      => $info['version'],
-        'url'          => is_string($info['url'] ?? null) ? $info['url'] : BEACON_UPDATE_BASE,
+        'url'          => is_string($info['url'] ?? null) ? $info['url'] : 'https://github.com/' . beacon_update_repo() . '/releases',
         'package'      => $info['package'],
         'requires'     => is_string($info['requires'] ?? null) ? $info['requires'] : '6.0',
         'requires_php' => is_string($info['requires_php'] ?? null) ? $info['requires_php'] : '8.0',
@@ -256,13 +232,13 @@ add_filter('plugins_api', function ($result, $action, $args) {
         'slug'          => 'beacon-analytics',
         'version'       => $info['version'] ?? BEACON_VERSION,
         'author'        => 'Montez French',
-        'homepage'      => BEACON_UPDATE_BASE,
+        'homepage'      => 'https://github.com/' . beacon_update_repo(),
         'requires'      => $info['requires'] ?? '6.0',
         'requires_php'  => $info['requires_php'] ?? '8.0',
         'last_updated'  => $info['last_updated'] ?? '',
         'download_link' => $info['package'] ?? '',
         'sections'      => [
-            'description' => '<p>Self-hosted, privacy-first analytics that live entirely inside this WordPress site. Updates are served from ' . esc_html(BEACON_UPDATE_HOST) . '.</p>',
+            'description' => '<p>Self-hosted, privacy-first analytics that live entirely inside this WordPress site. Updates come from GitHub Releases in ' . esc_html(beacon_update_repo()) . '.</p>',
             'changelog'   => $changelog !== '' ? wpautop(esc_html($changelog)) : '<p>See the release notes shipped with each version.</p>',
         ],
     ];

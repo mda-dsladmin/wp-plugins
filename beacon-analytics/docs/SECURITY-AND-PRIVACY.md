@@ -304,5 +304,5 @@ update zips from github.com. These requests carry no visitor data: only
 the plugin version in the User-Agent and, if one is saved, a read-only
 GitHub token. Only a .zip attached to a published release of the
 configured repo is accepted (download URL must be https://github.com/
-<repo>/releases/download/...). With the repo setting blank, the older
-self-hosted folder (envsnstudios.com/plugins/) is used instead.
+<repo>/releases/download/...). A blank repo setting uses the default
+repo. No other update host exists in the code.
