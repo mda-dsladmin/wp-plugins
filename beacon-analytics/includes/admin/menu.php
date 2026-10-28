@@ -53,6 +53,14 @@ add_action('admin_menu', function (): void {
     );
     $hooks[] = add_submenu_page(
         'beacon-analytics',
+        __('Service Lines', 'beacon-analytics'),
+        __('Service Lines', 'beacon-analytics'),
+        'manage_options',
+        'beacon-service-lines',
+        'beacon_render_service_lines'
+    );
+    $hooks[] = add_submenu_page(
+        'beacon-analytics',
         __('Site Scan', 'beacon-analytics'),
         __('Site Scan', 'beacon-analytics'),
         'manage_options',

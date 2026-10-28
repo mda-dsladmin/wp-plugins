@@ -259,3 +259,21 @@ beacon-analytics-v1.20.0; the version can also come from the asset name.
 Other plugins' releases in the same repo are ignored. "Check for updates"
 on the Plugins screen forces a fresh check and shows the reason if it
 fails. A blank repo field uses the default, mda-dsladmin/wp-plugins.
+
+## Service lines (v1.21.0)
+
+A "service line" is the entry link a visit arrived on, such as /?sl=brst
+(any entry page with an allow-listed query key). Beacon > Service Lines
+compares them side by side: visits, average visit length, average pages,
+percent on a phone, and percent that answered a survey. Pick one service
+line to see which pages its visits reached (with average time on each),
+what they clicked, and how they answered. Reports add five tabs with the
+same numbers for every service line at once: summary, pages, average time
+on page, clicks, and survey answers. Counts are visits, so repeat clicks
+in one visit count once. Visits with no entry link are shown as
+"(no entry link)" for comparison. Nothing new is collected; these tables
+are built from data Beacon already stores.
+
+Other changes: Excel tabs keep their header row frozen while scrolling;
+PDF tables wider than 8 columns are split into parts; Settings > Report
+tabs chooses which tabs appear in emailed reports and dashboard exports.

@@ -656,3 +656,188 @@ function beacon_get_survey_completion(string $range): array
     usort($out, static fn($a, $b) => $b['visits'] <=> $a['visits']);
     return $out;
 }
+
+/**
+ * Service-line breakdowns. A "service line" is the entry link a visit
+ * arrived on (an entry page with an allow-listed query, like /?sl=brst).
+ * Visits with no entry query are grouped as "(no entry link)" for
+ * comparison. Everything is computed from one bounded pull of the range's
+ * events, so all four tables agree with each other.
+ *
+ * Group names: a single key=value query shows just the value ("brst");
+ * anything else shows the whole query.
+ *
+ * @return array{groups:string[], summary:array, pages:array, time:array,
+ *               clicks:array, answers:array, sampled:bool}
+ */
+function beacon_get_service_line_data(string $range, int $max_groups = 20, int $max_rows = 200): array
+{
+    global $wpdb;
+    $table = beacon_table();
+    $since = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
+    $cap   = 100000;
+
+    $rows = $wpdb->get_results($wpdb->prepare(
+        "SELECT e.session_id, e.event_type, e.event_name, e.event_label, e.path,
+                e.created_at, fe.path AS entry, fe.device_type AS device
+         FROM {$table} e
+         JOIN (SELECT session_id, MIN(id) AS mid FROM {$table}
+               WHERE session_id IS NOT NULL AND created_at >= %s
+               GROUP BY session_id) fm ON fm.session_id = e.session_id
+         JOIN {$table} fe ON fe.id = fm.mid
+         WHERE e.created_at >= %s
+         ORDER BY e.session_id, e.id
+         LIMIT %d",
+        $since,
+        $since,
+        $cap
+    ), ARRAY_A);
+
+    $none = __('(no entry link)', 'beacon-analytics');
+    $label_for = static function (string $entry) use ($none): string {
+        $q = (string) parse_url($entry, PHP_URL_QUERY);
+        if ($q === '') {
+            return $none;
+        }
+        parse_str($q, $parts);
+        if (count($parts) === 1) {
+            $v = (string) reset($parts);
+            return $v !== '' ? $v : $q;
+        }
+        return $q;
+    };
+
+    // Walk visits in order.
+    $visits = []; // sid => [group, device, start, end, pages, answered, pageset, clickset, answerset, times]
+    $last_pv = []; // sid => [path, ts]
+    foreach ($rows as $r) {
+        $sid = (string) $r['session_id'];
+        $ts  = strtotime((string) $r['created_at'] . ' UTC');
+        if (!isset($visits[$sid])) {
+            $visits[$sid] = [
+                'group' => $label_for((string) $r['entry']), 'device' => (string) $r['device'],
+                'start' => $ts, 'end' => $ts, 'pages' => 0, 'answered' => false,
+                'pageset' => [], 'clickset' => [], 'answerset' => [], 'times' => [],
+            ];
+        }
+        $v = &$visits[$sid];
+        $v['end'] = max($v['end'], $ts);
+        if ($r['event_type'] === 'pageview') {
+            $v['pages']++;
+            $v['pageset'][(string) $r['path']] = true;
+            if (isset($last_pv[$sid])) {
+                [$p, $t0] = $last_pv[$sid];
+                $v['times'][$p][] = max(0, $ts - $t0);
+            }
+            $last_pv[$sid] = [(string) $r['path'], $ts];
+        } elseif ($r['event_name'] === 'survey_response') {
+            $v['answered'] = true;
+            if ((string) $r['event_label'] !== '') {
+                $v['answerset'][(string) $r['event_label']] = true;
+            }
+        } elseif ($r['event_name'] !== 'study_code') {
+            $key = (string) $r['event_name'];
+            if ((string) $r['event_label'] !== '') {
+                $key .= ' — ' . $r['event_label'];
+            }
+            $v['clickset'][$key] = true;
+        }
+        unset($v);
+    }
+
+    // Groups: busiest first, named groups capped, overflow merged.
+    $size = [];
+    foreach ($visits as $v) {
+        $size[$v['group']] = ($size[$v['group']] ?? 0) + 1;
+    }
+    $named = array_filter($size, static fn($g) => $g !== $none, ARRAY_FILTER_USE_KEY);
+    arsort($named);
+    $keep   = array_slice(array_keys($named), 0, $max_groups);
+    $other  = __('(other links)', 'beacon-analytics');
+    $groups = $keep;
+    if (count($named) > $max_groups) {
+        $groups[] = $other;
+    }
+    if (isset($size[$none])) {
+        $groups[] = $none;
+    }
+    foreach ($visits as &$v) {
+        if ($v['group'] !== $none && !in_array($v['group'], $keep, true)) {
+            $v['group'] = $other;
+        }
+    }
+    unset($v);
+
+    // Summary.
+    $acc = [];
+    foreach (array_merge(['__all'], $groups) as $g) {
+        $acc[$g] = ['visits' => 0, 'len' => 0, 'pages' => 0, 'mobile' => 0, 'answered' => 0];
+    }
+    $pages = $time = $clicks = $answers = [];
+    foreach ($visits as $v) {
+        foreach (['__all', $v['group']] as $g) {
+            $acc[$g]['visits']++;
+            $acc[$g]['len'] += $v['end'] - $v['start'];
+            $acc[$g]['pages'] += $v['pages'];
+            $acc[$g]['mobile'] += $v['device'] === 'mobile' ? 1 : 0;
+            $acc[$g]['answered'] += $v['answered'] ? 1 : 0;
+            foreach ($v['pageset'] as $p => $_) {
+                $pages[$p][$g] = ($pages[$p][$g] ?? 0) + 1;
+            }
+            foreach ($v['times'] as $p => $list) {
+                foreach ($list as $sec) {
+                    $time[$p][$g][] = $sec;
+                }
+            }
+            foreach ($v['clickset'] as $c => $_) {
+                $clicks[$c][$g] = ($clicks[$c][$g] ?? 0) + 1;
+            }
+            foreach ($v['answerset'] as $a => $_) {
+                $answers[$a][$g] = ($answers[$a][$g] ?? 0) + 1;
+            }
+        }
+    }
+
+    $summary = [];
+    foreach (array_merge(['__all'], $groups) as $g) {
+        $a = $acc[$g];
+        $n = max(1, $a['visits']);
+        $summary[] = [
+            'group'    => $g === '__all' ? __('All visits', 'beacon-analytics') : $g,
+            'visits'   => $a['visits'],
+            'avg_len'  => (int) round($a['len'] / $n),
+            'avg_pages'=> round($a['pages'] / $n, 1),
+            'mobile'   => round(100 * $a['mobile'] / $n, 1),
+            'answered' => round(100 * $a['answered'] / $n, 1),
+        ];
+    }
+
+    $pivot = static function (array $m) use ($groups, $max_rows): array {
+        uasort($m, static fn($x, $y) => ($y['__all'] ?? 0) <=> ($x['__all'] ?? 0));
+        $out = [];
+        foreach (array_slice($m, 0, $max_rows, true) as $label => $cells) {
+            $row = ['label' => (string) $label, 'all' => (int) ($cells['__all'] ?? 0), 'by' => []];
+            foreach ($groups as $g) {
+                $row['by'][$g] = (int) ($cells[$g] ?? 0);
+            }
+            $out[] = $row;
+        }
+        return $out;
+    };
+    $avg = [];
+    foreach ($time as $p => $by) {
+        foreach ($by as $g => $list) {
+            $avg[$p][$g] = (int) round(array_sum($list) / max(1, count($list)));
+        }
+    }
+
+    return [
+        'groups'  => $groups,
+        'summary' => $summary,
+        'pages'   => $pivot($pages),
+        'time'    => $avg,           // [path][group|'__all'] => avg seconds
+        'clicks'  => $pivot($clicks),
+        'answers' => $pivot($answers),
+        'sampled' => count($rows) >= $cap,
+    ];
+}

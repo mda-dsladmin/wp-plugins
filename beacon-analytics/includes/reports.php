@@ -84,7 +84,7 @@ function beacon_report_sections(string $range, array $content): array
     $days     = beacon_range_to_days($range);
 
     $sections[] = [
-        'title'   => __('About this report', 'beacon-analytics'),
+        'key' => 'about', 'title' => __('About this report', 'beacon-analytics'),
         'headers' => [],
         'rows'    => [
             [__('Site', 'beacon-analytics'), home_url('/')],
@@ -97,42 +97,42 @@ function beacon_report_sections(string $range, array $content): array
 
     if (in_array('analytics', $content, true)) {
         $d = beacon_get_summary($range, 200); // deep tables: nothing falls below a top-10 cut
-        $sections[] = ['title' => __('Totals', 'beacon-analytics'),
+        $sections[] = ['key' => 'totals', 'title' => __('Totals', 'beacon-analytics'),
             'headers' => [__('Pageviews', 'beacon-analytics'), __('Unique visitors', 'beacon-analytics'), __('Sessions', 'beacon-analytics')],
             'rows' => [[(int) $d['totals']['pageviews'], (int) $d['totals']['visitors'], (int) $d['totals']['sessions']]]];
-        $sections[] = ['title' => __('Pageviews by day', 'beacon-analytics'),
+        $sections[] = ['key' => 'series', 'title' => __('Pageviews by day', 'beacon-analytics'),
             'headers' => [__('Day', 'beacon-analytics'), __('Views', 'beacon-analytics')],
             'rows' => array_map(fn($r) => [$r['day'], (int) $r['views']], $d['series'])];
         $pivot = beacon_get_entry_link_series($range);
         if ($pivot) {
-            $sections[] = ['title' => __('Pageviews by entry link', 'beacon-analytics'),
+            $sections[] = ['key' => 'entry_links', 'title' => __('Pageviews by entry link', 'beacon-analytics'),
                 'headers' => $pivot['headers'], 'rows' => $pivot['rows']];
         }
         $simple = [
-            [__('Top pages', 'beacon-analytics'),    __('Path', 'beacon-analytics'),    __('Views', 'beacon-analytics'),    $d['top_pages']],
-            [__('Entry pages', 'beacon-analytics'),  __('Path', 'beacon-analytics'),    __('Sessions', 'beacon-analytics'), $d['entries']],
-            [__('Exit pages', 'beacon-analytics'),   __('Path', 'beacon-analytics'),    __('Sessions', 'beacon-analytics'), $d['exits']],
-            [__('Referrers', 'beacon-analytics'),    __('Source', 'beacon-analytics'),  __('Views', 'beacon-analytics'),    $d['referrers']],
-            [__('Devices', 'beacon-analytics'),      __('Device', 'beacon-analytics'),  __('Views', 'beacon-analytics'),    $d['devices']],
-            [__('Browsers', 'beacon-analytics'),     __('Browser', 'beacon-analytics'), __('Views', 'beacon-analytics'),    $d['browsers']],
-            [__('Operating systems', 'beacon-analytics'), __('OS', 'beacon-analytics'), __('Views', 'beacon-analytics'),    $d['oses']],
-            [__('Screen sizes', 'beacon-analytics'), __('Size', 'beacon-analytics'),    __('Views', 'beacon-analytics'),    $d['screens']],
-            [__('Exit URLs (outbound clicks)', 'beacon-analytics'), __('Destination', 'beacon-analytics'), __('Clicks', 'beacon-analytics'), $d['exit_urls']],
+            ['top_pages', __('Top pages', 'beacon-analytics'),    __('Path', 'beacon-analytics'),    __('Views', 'beacon-analytics'),    $d['top_pages']],
+            ['entries', __('Entry pages', 'beacon-analytics'),  __('Path', 'beacon-analytics'),    __('Sessions', 'beacon-analytics'), $d['entries']],
+            ['exits', __('Exit pages', 'beacon-analytics'),   __('Path', 'beacon-analytics'),    __('Sessions', 'beacon-analytics'), $d['exits']],
+            ['referrers', __('Referrers', 'beacon-analytics'),    __('Source', 'beacon-analytics'),  __('Views', 'beacon-analytics'),    $d['referrers']],
+            ['devices', __('Devices', 'beacon-analytics'),      __('Device', 'beacon-analytics'),  __('Views', 'beacon-analytics'),    $d['devices']],
+            ['browsers', __('Browsers', 'beacon-analytics'),     __('Browser', 'beacon-analytics'), __('Views', 'beacon-analytics'),    $d['browsers']],
+            ['oses', __('Operating systems', 'beacon-analytics'), __('OS', 'beacon-analytics'), __('Views', 'beacon-analytics'),    $d['oses']],
+            ['screens', __('Screen sizes', 'beacon-analytics'), __('Size', 'beacon-analytics'),    __('Views', 'beacon-analytics'),    $d['screens']],
+            ['exit_urls', __('Exit URLs (outbound clicks)', 'beacon-analytics'), __('Destination', 'beacon-analytics'), __('Clicks', 'beacon-analytics'), $d['exit_urls']],
         ];
-        foreach ($simple as [$title, $h1, $h2, $rows]) {
-            $sections[] = ['title' => $title, 'headers' => [$h1, $h2],
+        foreach ($simple as [$skey, $title, $h1, $h2, $rows]) {
+            $sections[] = ['key' => $skey, 'title' => $title, 'headers' => [$h1, $h2],
                 'rows' => array_map('array_values', array_map(fn($r) => array_slice($r, 0, 2), $rows))];
         }
         if ($d['countries']) {
-            $sections[] = ['title' => __('Countries', 'beacon-analytics'),
+            $sections[] = ['key' => 'countries', 'title' => __('Countries', 'beacon-analytics'),
                 'headers' => [__('Country', 'beacon-analytics'), __('Views', 'beacon-analytics')],
                 'rows' => array_map('array_values', $d['countries'])];
-            $sections[] = ['title' => __('US states', 'beacon-analytics'),
+            $sections[] = ['key' => 'regions', 'title' => __('US states', 'beacon-analytics'),
                 'headers' => [__('State', 'beacon-analytics'), __('Views', 'beacon-analytics')],
                 'rows' => array_map('array_values', $d['regions'])];
         }
         if ($d['avg_load'] > 0) {
-            $sections[] = ['title' => __('Performance', 'beacon-analytics'),
+            $sections[] = ['key' => 'performance', 'title' => __('Performance', 'beacon-analytics'),
                 'headers' => [__('Average page load (ms)', 'beacon-analytics')],
                 'rows' => [[(int) $d['avg_load']]]];
         }
@@ -145,7 +145,7 @@ function beacon_report_sections(string $range, array $content): array
             gmdate('Y-m-d H:i:s', time() - $days * DAY_IN_SECONDS)
         ), ARRAY_A);
         if ($survey) {
-            $sections[] = ['title' => __('Survey responses', 'beacon-analytics'),
+            $sections[] = ['key' => 'survey', 'title' => __('Survey responses', 'beacon-analytics'),
                 'headers' => [__('Question → Answer', 'beacon-analytics'), __('Responses', 'beacon-analytics')],
                 'rows' => array_map('array_values', $survey)];
         }
@@ -153,7 +153,7 @@ function beacon_report_sections(string $range, array $content): array
         // How far visitors got through each page's questions.
         $comp = beacon_get_survey_completion($range);
         if ($comp) {
-            $sections[] = ['title' => __('Survey completion', 'beacon-analytics'),
+            $sections[] = ['key' => 'survey_completion', 'title' => __('Survey completion', 'beacon-analytics'),
                 // Short headers so the PDF columns fit: visits to the page,
                 // visits that answered 1+ / half+ / all questions, % all.
                 'headers' => [__('Questions', 'beacon-analytics'), __('Visits', 'beacon-analytics'),
@@ -167,14 +167,18 @@ function beacon_report_sections(string $range, array $content): array
         // Milestones and tagged clicks: how often each fired, in how many visits.
         $ev = beacon_get_event_totals($range);
         if ($ev['totals']) {
-            $sections[] = ['title' => __('Event totals', 'beacon-analytics'),
+            $sections[] = ['key' => 'event_totals', 'title' => __('Event totals', 'beacon-analytics'),
                 'headers' => [__('Event', 'beacon-analytics'), __('Times', 'beacon-analytics'), __('Visits', 'beacon-analytics')],
                 'rows' => array_map(static fn($e) => [(string) $e['event_name'], (int) $e['fires'], (int) $e['visits']], $ev['totals'])];
-            $sections[] = ['title' => __('Event details', 'beacon-analytics'),
+            $sections[] = ['key' => 'event_details', 'title' => __('Event details', 'beacon-analytics'),
                 'headers' => [__('Event', 'beacon-analytics'), __('Times', 'beacon-analytics'),
                     __('Visits', 'beacon-analytics'), __('Label', 'beacon-analytics')],
                 'rows' => array_map(static fn($e) => [(string) $e['event_name'], (int) $e['fires'],
                     (int) $e['visits'], (string) $e['label']], $ev['details'])];
+        }
+
+        foreach (beacon_report_service_line_sections($range) as $sl) {
+            $sections[] = $sl;
         }
     }
 
@@ -185,7 +189,7 @@ function beacon_report_sections(string $range, array $content): array
             foreach ($f['steps'] as $i => $step) {
                 $rows[] = [($step['type'] === 'event' ? 'event: ' : '') . $step['value'], (int) $f['counts'][$i]];
             }
-            $sections[] = ['title' => sprintf(/* translators: %s: funnel name */ __('Funnel: %s', 'beacon-analytics'), $f['name']),
+            $sections[] = ['key' => 'funnels', 'title' => sprintf(/* translators: %s: funnel name */ __('Funnel: %s', 'beacon-analytics'), $f['name']),
                 'headers' => [__('Step', 'beacon-analytics'), __('Sessions reaching it', 'beacon-analytics')],
                 'rows' => $rows];
         }
@@ -198,7 +202,7 @@ function beacon_report_sections(string $range, array $content): array
              GROUP BY severity ORDER BY FIELD(severity,'critical','serious','moderate','minor')", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
             ARRAY_A
         );
-        $sections[] = ['title' => __('Site scan: open findings by severity', 'beacon-analytics'),
+        $sections[] = ['key' => 'scan_counts', 'title' => __('Site scan: open findings by severity', 'beacon-analytics'),
             'headers' => [__('Severity', 'beacon-analytics'), __('Open findings', 'beacon-analytics')],
             'rows' => $counts ? array_map('array_values', $counts) : [[__('none', 'beacon-analytics'), 0]]];
         $rows = $wpdb->get_results(
@@ -207,7 +211,7 @@ function beacon_report_sections(string $range, array $content): array
             ARRAY_A
         );
         if ($rows) {
-            $sections[] = ['title' => __('Site scan: open findings (up to 300)', 'beacon-analytics'),
+            $sections[] = ['key' => 'scan_findings', 'title' => __('Site scan: open findings (up to 300)', 'beacon-analytics'),
                 'headers' => [__('Severity', 'beacon-analytics'), __('Category', 'beacon-analytics'), __('Page', 'beacon-analytics'), __('Issue', 'beacon-analytics')],
                 'rows' => array_map('array_values', $rows)];
         }
@@ -219,7 +223,111 @@ function beacon_report_sections(string $range, array $content): array
         }
     }
 
+    // Tabs switched off in Settings > Report tabs are dropped everywhere
+    // (emailed reports and dashboard exports). "About" always stays.
+    $off = array_filter(explode(',', (string) beacon_settings()['report_tabs_off']));
+    if ($off) {
+        $sections = array_values(array_filter($sections,
+            static fn($s) => ($s['key'] ?? '') === 'about' || !in_array($s['key'] ?? '', $off, true)));
+    }
     return $sections;
+}
+
+/** Every report tab that can be switched off: key => label. */
+function beacon_report_tab_choices(): array
+{
+    return [
+        'totals'            => __('Totals', 'beacon-analytics'),
+        'series'            => __('Pageviews by day', 'beacon-analytics'),
+        'entry_links'       => __('Pageviews by entry link', 'beacon-analytics'),
+        'top_pages'         => __('Top pages', 'beacon-analytics'),
+        'entries'           => __('Entry pages', 'beacon-analytics'),
+        'exits'             => __('Exit pages', 'beacon-analytics'),
+        'referrers'         => __('Referrers', 'beacon-analytics'),
+        'devices'           => __('Devices', 'beacon-analytics'),
+        'browsers'          => __('Browsers', 'beacon-analytics'),
+        'oses'              => __('Operating systems', 'beacon-analytics'),
+        'screens'           => __('Screen sizes', 'beacon-analytics'),
+        'exit_urls'         => __('Exit URLs (outbound clicks)', 'beacon-analytics'),
+        'countries'         => __('Countries', 'beacon-analytics'),
+        'regions'           => __('US states', 'beacon-analytics'),
+        'performance'       => __('Performance', 'beacon-analytics'),
+        'survey'            => __('Survey responses', 'beacon-analytics'),
+        'survey_completion' => __('Survey completion', 'beacon-analytics'),
+        'event_totals'      => __('Event totals', 'beacon-analytics'),
+        'event_details'     => __('Event details', 'beacon-analytics'),
+        'sl_summary'        => __('Service lines: summary', 'beacon-analytics'),
+        'sl_pages'          => __('Service lines: pages', 'beacon-analytics'),
+        'sl_time'           => __('Service lines: time on page', 'beacon-analytics'),
+        'sl_clicks'         => __('Service lines: clicks', 'beacon-analytics'),
+        'sl_answers'        => __('Service lines: survey answers', 'beacon-analytics'),
+        'funnels'           => __('Funnels', 'beacon-analytics'),
+        'scan_counts'       => __('Site scan: findings by severity', 'beacon-analytics'),
+        'scan_findings'     => __('Site scan: open findings', 'beacon-analytics'),
+        'journey_sessions'  => __('Journeys: sessions', 'beacon-analytics'),
+        'journey_steps'     => __('Journeys: steps', 'beacon-analytics'),
+    ];
+}
+
+/**
+ * Service-line tabs: summary, pages, time on page, clicks, survey answers.
+ * Rows are items; columns are "All" plus one column per service line.
+ * Counts are VISITS (a visit that clicks twice counts once). Empty when
+ * no visit in the range arrived on an entry link.
+ */
+function beacon_report_service_line_sections(string $range): array
+{
+    $d = beacon_get_service_line_data($range);
+    $named = array_filter($d['groups'], static fn($g) => $g !== __('(no entry link)', 'beacon-analytics'));
+    if (!$named) {
+        return [];
+    }
+    $out  = [];
+    $note = $d['sampled'] ? ' ' . __('(sampled: very busy range)', 'beacon-analytics') : '';
+
+    $out[] = ['key' => 'sl_summary', 'title' => __('Service lines: summary', 'beacon-analytics') . $note,
+        'headers' => [__('Service line', 'beacon-analytics'), __('Visits', 'beacon-analytics'),
+            __('Avg visit (s)', 'beacon-analytics'), __('Avg pages', 'beacon-analytics'),
+            __('% phone', 'beacon-analytics'), __('% answered survey', 'beacon-analytics')],
+        'rows' => array_map(static fn($s) => [$s['group'], $s['visits'], $s['avg_len'], $s['avg_pages'],
+            $s['mobile'], $s['answered']], $d['summary'])];
+
+    $head = static fn(string $first) => array_merge([$first, __('All', 'beacon-analytics')], $d['groups']);
+    $grid = static function (array $items) use ($d): array {
+        $rows = [];
+        foreach ($items as $it) {
+            $row = [$it['label'], $it['all']];
+            foreach ($d['groups'] as $g) {
+                $row[] = $it['by'][$g];
+            }
+            $rows[] = $row;
+        }
+        return $rows;
+    };
+
+    if ($d['pages']) {
+        $out[] = ['key' => 'sl_pages', 'title' => __('Service lines: pages (visits)', 'beacon-analytics'),
+            'headers' => $head(__('Page', 'beacon-analytics')), 'rows' => $grid($d['pages'])];
+        $trows = [];
+        foreach ($d['pages'] as $it) {
+            $row = [$it['label'], $d['time'][$it['label']]['__all'] ?? ''];
+            foreach ($d['groups'] as $g) {
+                $row[] = $d['time'][$it['label']][$g] ?? '';
+            }
+            $trows[] = $row;
+        }
+        $out[] = ['key' => 'sl_time', 'title' => __('Service lines: avg time on page (s)', 'beacon-analytics'),
+            'headers' => $head(__('Page', 'beacon-analytics')), 'rows' => $trows];
+    }
+    if ($d['clicks']) {
+        $out[] = ['key' => 'sl_clicks', 'title' => __('Service lines: clicks (visits)', 'beacon-analytics'),
+            'headers' => $head(__('Event — label', 'beacon-analytics')), 'rows' => $grid($d['clicks'])];
+    }
+    if ($d['answers']) {
+        $out[] = ['key' => 'sl_answers', 'title' => __('Service lines: survey answers (visits)', 'beacon-analytics'),
+            'headers' => $head(__('Question → Answer', 'beacon-analytics')), 'rows' => $grid($d['answers'])];
+    }
+    return $out;
 }
 
 /**
@@ -258,7 +366,7 @@ function beacon_report_journey_sections(string $range): array
             beacon_split_path((string) $s['entry_path'])[0]);
         $rows[] = $row;
     }
-    $out[] = ['title' => __('Journeys: sessions (most recent 200)', 'beacon-analytics'),
+    $out[] = ['key' => 'journey_sessions', 'title' => __('Journeys: sessions (most recent 200)', 'beacon-analytics'),
         'headers' => $head, 'rows' => $rows];
 
     // Step-by-step detail for the most recent sessions.
@@ -304,7 +412,7 @@ function beacon_report_journey_sections(string $range): array
             isset($durs[$i]) ? $durs[$i] : '',
             $what];
     }
-    $out[] = ['title' => __('Journeys: steps (most recent 50 sessions)', 'beacon-analytics'),
+    $out[] = ['key' => 'journey_steps', 'title' => __('Journeys: steps (most recent 50 sessions)', 'beacon-analytics'),
         'headers' => [__('Session', 'beacon-analytics'), __('#', 'beacon-analytics'),
             __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'),
             __('On page (s)', 'beacon-analytics'), __('Step', 'beacon-analytics')],
@@ -383,6 +491,8 @@ function beacon_xlsx_sheet(array $section): string
 
     $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
          . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+         // Header row stays put while scrolling (View > Freeze top row).
+         . ($section['headers'] ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '')
          . '<cols><col min="1" max="1" width="52" customWidth="1"/><col min="2" max="8" width="20" customWidth="1"/></cols>'
          . '<sheetData>';
     foreach ($rows as $ri => $row) {
@@ -492,6 +602,27 @@ function beacon_pdf_text(string $v): string
 function beacon_report_write_pdf(array $sections, string $path, string $title): bool
 {
     $W = 612.0; $H = 792.0; $MARGIN = 54.0; $CW = $W - 2 * $MARGIN;
+
+    // A Letter page fits about 8 columns. Wider tables (one column per
+    // service line) are split into parts that repeat the first column.
+    $split = [];
+    foreach ($sections as $s) {
+        $n = count($s['headers']);
+        if ($n <= 8) {
+            $split[] = $s;
+            continue;
+        }
+        $chunks = array_chunk(range(1, $n - 1), 6);
+        foreach ($chunks as $ci => $cols) {
+            $pick = static fn(array $row) => array_merge([$row[0] ?? ''], array_map(static fn($c) => $row[$c] ?? '', $cols));
+            $split[] = [
+                'title'   => $s['title'] . sprintf(' (part %d of %d)', $ci + 1, count($chunks)),
+                'headers' => $pick(array_values($s['headers'])),
+                'rows'    => array_map(static fn($row) => $pick(array_values($row)), $s['rows']),
+            ];
+        }
+    }
+    $sections = $split;
 
     // ---- Layout pass: turn sections into per-page draw commands. ----
     $pages = [];

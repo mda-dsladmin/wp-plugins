@@ -500,3 +500,8 @@
     transition-duration: 0.001ms !important;
   }
 }
+
+/* Report tab picker + service lines screen */
+.beacon-tab-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(14rem, 1fr)); gap: .25rem 1rem; }
+.beacon-scroll-x { overflow-x: auto; }
+.beacon-scroll-x .beacon-table td, .beacon-scroll-x .beacon-table th { white-space: nowrap; }

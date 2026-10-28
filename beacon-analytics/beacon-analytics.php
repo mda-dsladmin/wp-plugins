@@ -2,7 +2,7 @@
 /**
  * Plugin Name:       Beacon Analytics
  * Description:       Self-hosted, privacy-first analytics that live entirely inside this WordPress site. Collector, tracker, tag manager, and dashboard — no third-party calls, no cookies, no IPs stored.
- * Version:           1.20.2
+ * Version:           1.21.0
  * Requires at least: 6.0
  * Requires PHP:      8.0
  * Author:            Montez French
@@ -38,7 +38,7 @@ if (!defined('ABSPATH')) {
 
 const BEACON_OPT     = 'beacon_analytics_settings';
 const BEACON_SALT    = 'beacon_analytics_salt';
-const BEACON_VERSION = '1.20.2';
+const BEACON_VERSION = '1.21.0';
 
 define('BEACON_FILE', __FILE__);
 define('BEACON_DIR', plugin_dir_path(__FILE__));
@@ -63,6 +63,7 @@ if (is_admin()) {
     require_once BEACON_DIR . 'includes/admin/scan-page.php';
     require_once BEACON_DIR . 'includes/admin/charts.php';
     require_once BEACON_DIR . 'includes/admin/journeys-page.php';
+    require_once BEACON_DIR . 'includes/admin/service-lines-page.php';
     require_once BEACON_DIR . 'includes/admin/export.php';
 }
 
@@ -132,6 +133,8 @@ function beacon_settings(): array
         // default repo). Token is optional: only for rate limits.
         'update_repo'          => 'mda-dsladmin/wp-plugins',
         'update_token'         => '',
+        // Report tabs switched OFF (comma list of keys). Blank = all tabs on.
+        'report_tabs_off'      => '',
     ];
     $saved = get_option(BEACON_OPT, []);
     return is_array($saved) ? array_merge($defaults, $saved) : $defaults;

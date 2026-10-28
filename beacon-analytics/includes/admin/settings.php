@@ -113,6 +113,15 @@ function beacon_sanitize_settings($input): array
         ))),
         'report_format'        => in_array($input['report_format'] ?? '', ['xlsx', 'pdf', 'csv'], true)
             ? $input['report_format'] : 'xlsx',
+        // Report tabs: the form posts the tabs that are ON; store the ones OFF
+        // so tabs added in future versions default to on.
+        'report_tabs_off'      => (static function () use ($input) {
+            if (!function_exists('beacon_report_tab_choices')) {
+                require_once BEACON_DIR . 'includes/reports.php';
+            }
+            $on = array_map('sanitize_key', (array) ($input['report_tabs_on'] ?? []));
+            return implode(',', array_diff(array_keys(beacon_report_tab_choices()), $on));
+        })(),
         // GitHub repo for updates: strict owner/repo or blank.
         'update_repo'          => preg_match('#^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}$#', trim((string) ($input['update_repo'] ?? '')))
             ? trim((string) $input['update_repo']) : '',
@@ -518,6 +527,27 @@ function beacon_render_settings(): void
         </section>
 
         <section class="beacon-card">
+          <h2><?php esc_html_e('Report tabs', 'beacon-analytics'); ?></h2>
+          <p class="beacon-help"><?php esc_html_e('Choose which tabs appear in the emailed reports and in Export Excel / CSV / PDF on the dashboard. Unchecked tabs are left out everywhere. Tabs only appear when they have data.', 'beacon-analytics'); ?></p>
+          <fieldset class="beacon-field beacon-tab-grid">
+            <legend class="screen-reader-text"><?php esc_html_e('Report tabs', 'beacon-analytics'); ?></legend>
+            <?php
+            if (!function_exists('beacon_report_tab_choices')) {
+                require_once BEACON_DIR . 'includes/reports.php';
+            }
+            $beacon_off = array_filter(explode(',', (string) $o['report_tabs_off']));
+            foreach (beacon_report_tab_choices() as $beacon_tk => $beacon_tl) :
+            ?>
+            <label class="beacon-check">
+              <input type="checkbox" name="<?php echo esc_attr($name); ?>[report_tabs_on][]"
+                     value="<?php echo esc_attr($beacon_tk); ?>" <?php checked(!in_array($beacon_tk, $beacon_off, true)); ?>>
+              <?php echo esc_html($beacon_tl); ?>
+            </label>
+            <?php endforeach; ?>
+          </fieldset>
+        </section>
+
+                <section class="beacon-card">
           <h2><?php esc_html_e('Updates', 'beacon-analytics'); ?></h2>
           <div class="beacon-field">
             <label for="beacon_update_repo"><?php esc_html_e('GitHub repo (owner/repo)', 'beacon-analytics'); ?></label>
