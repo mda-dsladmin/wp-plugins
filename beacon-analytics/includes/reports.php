@@ -449,7 +449,7 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
     $sessions = beacon_get_sessions($range, '', 1, $max_sessions);
     $out      = [];
 
-    $head = [__('Started', 'beacon-analytics'), __('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics')];
+    $head = [__('Started', 'beacon-analytics'), __('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('Visitor', 'beacon-analytics')];
     if ($study_on) {
         $head[] = __('Study code', 'beacon-analytics');
     }
@@ -462,6 +462,7 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
             get_date_from_gmt((string) $s['started'], 'Y-m-d H:i'),
             substr((string) $s['session_id'], 0, 8),
             beacon_service_line_label((string) $s['entry_path']),
+            beacon_visitor_label($range, $s['vh'] ?? null),
         ];
         if ($study_on) {
             $row[] = (string) ($s['study_code'] ?? '');
@@ -480,8 +481,10 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
     $ids   = array_column(array_slice($sessions, 0, $max_detail), 'session_id');
     $steps = beacon_get_steps_for_sessions($ids, $max_detail, $deep ? 100000 : 5000);
     $line  = [];
+    $who   = [];
     foreach ($sessions as $s) {
         $line[(string) $s['session_id']] = beacon_service_line_label((string) $s['entry_path']);
+        $who[(string) $s['session_id']]  = beacon_visitor_label($range, $s['vh'] ?? null);
     }
 
     // Time on page per pageview: gap to the next pageview IN THE SAME
@@ -523,7 +526,7 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
             $is_pv   = $st['event_type'] === 'pageview';
             $is_ans  = (string) $st['event_name'] === 'survey_response';
             $qa      = $is_ans ? explode(' → ', (string) $st['event_label'], 2) : ['', ''];
-            $rows[] = [substr($sid, 0, 8), $line[$sid] ?? '', $n[$sid],
+            $rows[] = [substr($sid, 0, 8), $line[$sid] ?? '', $who[$sid] ?? '', $n[$sid],
                 get_date_from_gmt((string) $st['created_at'], 'Y-m-d H:i:s'),
                 $is_pv ? __('page', 'beacon-analytics') : (string) $st['event_type'],
                 (string) $st['path'],
@@ -533,7 +536,7 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
                 isset($durs[$i]) ? $durs[$i] : ''];
             continue;
         }
-        $rows[] = [substr($sid, 0, 8), $line[$sid] ?? '', $n[$sid],
+        $rows[] = [substr($sid, 0, 8), $line[$sid] ?? '', $who[$sid] ?? '', $n[$sid],
             get_date_from_gmt((string) $st['created_at'], 'Y-m-d H:i:s'),
             $st['event_type'] === 'pageview' ? __('page', 'beacon-analytics') : (string) $st['event_type'],
             isset($durs[$i]) ? $durs[$i] : '',
@@ -542,12 +545,12 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
     $out[] = ['key' => 'journey_steps',
         'title' => sprintf(/* translators: %d: count */ __('Journeys: steps (%d visits)', 'beacon-analytics'), count($n)),
         'headers' => $deep
-            ? [__('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('#', 'beacon-analytics'),
+            ? [__('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('Visitor', 'beacon-analytics'), __('#', 'beacon-analytics'),
                 __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'), __('Page', 'beacon-analytics'),
                 __('Event', 'beacon-analytics'), __('Label', 'beacon-analytics'),
                 __('Question', 'beacon-analytics'), __('Answer', 'beacon-analytics'),
                 __('On page (s)', 'beacon-analytics')]
-            : [__('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('#', 'beacon-analytics'),
+            : [__('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('Visitor', 'beacon-analytics'), __('#', 'beacon-analytics'),
                 __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'),
                 __('On page (s)', 'beacon-analytics'), __('Step', 'beacon-analytics')],
         'rows' => $rows];

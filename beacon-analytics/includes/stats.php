@@ -242,11 +242,15 @@ function beacon_get_summary(string $range, int $limit = 10): array
  *
  * @return array{0:string,1:array}
  */
-function beacon_entry_filter_sql(string $entry, string $query): array
+function beacon_entry_filter_sql(string $entry, string $query, string $vh = ''): array
 {
     global $wpdb;
     $sql    = '';
     $params = [];
+    if ($vh !== '') {
+        $sql     .= ' AND fe.visitor_day_hash = %s';
+        $params[] = $vh;
+    }
     if ($entry !== '') {
         $sql     .= ' AND fe.path LIKE %s';
         $params[] = $wpdb->esc_like($entry) . '%';
@@ -265,14 +269,14 @@ function beacon_entry_filter_sql(string $entry, string $query): array
     return [$sql, $params];
 }
 
-function beacon_get_sessions(string $range, string $entry = '', int $page = 1, int $per_page = 50, string $query = ''): array
+function beacon_get_sessions(string $range, string $entry = '', int $page = 1, int $per_page = 50, string $query = '', string $vh = ''): array
 {
     global $wpdb;
     $table  = beacon_table();
     $since  = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
     $offset = max(0, ($page - 1)) * $per_page;
 
-    [$entry_sql, $fparams] = beacon_entry_filter_sql($entry, $query);
+    [$entry_sql, $fparams] = beacon_entry_filter_sql($entry, $query, $vh);
     $params   = array_merge([$since, $since, $since], $fparams);
     $params[] = $per_page;
     $params[] = $offset;
@@ -286,6 +290,7 @@ function beacon_get_sessions(string $range, string $entry = '', int $page = 1, i
                 SUM(e.event_type = 'pageview') AS pageviews,
                 SUM(e.event_type <> 'pageview') AS events,
                 fe.path AS entry_path,
+                fe.visitor_day_hash AS vh,
                 sc.code AS study_code
          FROM {$table} e
          JOIN (SELECT session_id, MIN(id) AS mid FROM {$table}
@@ -296,7 +301,7 @@ function beacon_get_sessions(string $range, string $entry = '', int $page = 1, i
                WHERE event_name = 'study_code' AND created_at >= %s
                GROUP BY session_id) sc ON sc.session_id = e.session_id
          WHERE e.session_id IS NOT NULL AND e.created_at >= %s{$entry_sql}
-         GROUP BY e.session_id, fe.path, sc.code
+         GROUP BY e.session_id, fe.path, fe.visitor_day_hash, sc.code
          ORDER BY started DESC
          LIMIT %d OFFSET %d",
         ...$params
@@ -306,20 +311,20 @@ function beacon_get_sessions(string $range, string $entry = '', int $page = 1, i
 /**
  * How many sessions match the range + entry filter (for the pager).
  */
-function beacon_count_sessions(string $range, string $entry = '', string $query = ''): int
+function beacon_count_sessions(string $range, string $entry = '', string $query = '', string $vh = ''): int
 {
     global $wpdb;
     $table = beacon_table();
     $since = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
 
-    if ($entry === '' && ltrim($query, '?') === '') {
+    if ($entry === '' && ltrim($query, '?') === '' && $vh === '') {
         return (int) $wpdb->get_var($wpdb->prepare(
             "SELECT COUNT(DISTINCT session_id) FROM {$table}
              WHERE session_id IS NOT NULL AND created_at >= %s",
             $since
         ));
     }
-    [$filter_sql, $fparams] = beacon_entry_filter_sql($entry, $query);
+    [$filter_sql, $fparams] = beacon_entry_filter_sql($entry, $query, $vh);
     return (int) $wpdb->get_var($wpdb->prepare(
         "SELECT COUNT(*) FROM (
             SELECT fm.session_id
@@ -331,6 +336,50 @@ function beacon_count_sessions(string $range, string $entry = '', string $query 
          ) c",
         ...array_merge([$since], $fparams)
     ));
+}
+
+/**
+ * "Visitor 1, Visitor 2..." labels for the range, so same-day visits from
+ * the same browser can be grouped without exposing the stored visitor code.
+ *
+ * Why labels instead of the code: the daily code is built from the IP and
+ * browser, and HIPAA's rule for codes in de-identified data says a code must
+ * not be derived from information about the person. These labels are just
+ * order of first appearance in the range; they are built fresh for each
+ * view or report, never stored, and mean nothing outside it. The code
+ * itself resets at local midnight, so a label never spans two days.
+ *
+ * @return array<string,int> visitor code => label number (oldest first)
+ */
+function beacon_visitor_labels(string $range): array
+{
+    static $cache = [];
+    if (isset($cache[$range])) {
+        return $cache[$range];
+    }
+    global $wpdb;
+    $since = gmdate('Y-m-d H:i:s', time() - beacon_range_to_days($range) * DAY_IN_SECONDS);
+    $hashes = $wpdb->get_col($wpdb->prepare(
+        'SELECT visitor_day_hash FROM ' . beacon_table() . '
+         WHERE visitor_day_hash IS NOT NULL AND session_id IS NOT NULL AND created_at >= %s
+         GROUP BY visitor_day_hash ORDER BY MIN(id) ASC',
+        $since
+    ));
+    $map = [];
+    foreach ((array) $hashes as $i => $h) {
+        $map[(string) $h] = $i + 1;
+    }
+    return $cache[$range] = $map;
+}
+
+/** "Visitor 12" for a session row's visitor code ('' when there is none). */
+function beacon_visitor_label(string $range, ?string $vh): string
+{
+    if ($vh === null || $vh === '') {
+        return '';
+    }
+    $n = beacon_visitor_labels($range)[$vh] ?? 0;
+    return $n > 0 ? sprintf(/* translators: %d: number */ __('Visitor %d', 'beacon-analytics'), $n) : '';
 }
 
 /**

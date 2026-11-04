@@ -314,3 +314,11 @@ survey answers, and the line's journey steps in the same columns as the
 main Journeys tab. CSV and PDF leave these out (a CSV has one sheet; a PDF
 would get very long). Turn them off in Settings > Report tabs ("One tab per
 service line").
+
+## Visitor numbers (v1.25.0)
+
+Journeys has a Visitor column ("Visitor 3"): visits from the same browser
+on the same day share a number. Click a number to see only that visitor's
+visits. The Excel/CSV journey tabs carry the same column. Numbers are built
+fresh for each view or report and never stored (they are not the visitor
+code), and a new day means a new number. See docs/SECURITY-AND-PRIVACY.md.

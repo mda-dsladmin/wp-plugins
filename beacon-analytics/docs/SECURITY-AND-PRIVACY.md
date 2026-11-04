@@ -306,3 +306,21 @@ GitHub token. Only a .zip attached to a published release of the
 configured repo is accepted (download URL must be https://github.com/
 <repo>/releases/download/...). A blank repo setting uses the default
 repo. No other update host exists in the code.
+
+## Visitor numbers (v1.25.0)
+
+Journeys and the Excel/CSV journey tabs show "Visitor 1", "Visitor 2",
+and so on, so same-day visits from the same browser can be grouped. These
+are NOT the stored visitor code. They are order-of-first-appearance labels
+built fresh for each screen or report, never stored, and meaningless
+outside that one view. This matches HIPAA's rule for codes in
+de-identified data (45 CFR 164.514(c)): the code must not be derived from
+information about the individual, and the means of re-identification must
+not be disclosed. The stored daily code is derived from the IP and browser,
+so it never leaves the server.
+
+Limits, by design: the daily code resets at local midnight, so a visitor
+number never spans two days, and visits from people sharing a network and
+the same browser version can occasionally share a number. Following a
+specific person across days requires the opt-in study code feature and the
+consent and hosting conditions described above.
