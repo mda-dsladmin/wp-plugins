@@ -322,3 +322,16 @@ on the same day share a number. Click a number to see only that visitor's
 visits. The Excel/CSV journey tabs carry the same column. Numbers are built
 fresh for each view or report and never stored (they are not the visitor
 code), and a new day means a new number. See docs/SECURITY-AND-PRIVACY.md.
+
+## Tidier reports (v1.26.0)
+
+Related small tables now share a tab and repeated tables are gone:
+Overview (about, totals, page load), Technology (devices, browsers, OS,
+screens), Locations (countries, US states), Events (totals and details),
+Service lines compare (summary, pages, time on page, clicks, answers), and
+Funnels (all on one tab). "Pageviews by day" is left out when "Pageviews
+by entry link" exists, and the site-wide "Survey responses" is left out
+when service lines exist, since those tabs already hold the same numbers.
+The Journeys tabs have fixed names so Excel formulas and pivots that point
+at them keep working; the visit count is on the Overview tab. CSV and PDF
+show the combined tabs as separate tables.

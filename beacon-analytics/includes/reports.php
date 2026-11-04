@@ -221,6 +221,9 @@ function beacon_report_sections(string $range, array $content, bool $deep = fals
     if (in_array('journeys', $content, true)) {
         $journeys = beacon_report_journey_sections($range, $deep);
         foreach ($journeys as $js) {
+            if (!empty($js['note'])) {
+                $sections[0]['rows'][] = [__('Journeys tabs', 'beacon-analytics'), (string) $js['note']];
+            }
             $sections[] = $js;
         }
     }
@@ -233,43 +236,108 @@ function beacon_report_sections(string $range, array $content, bool $deep = fals
     }
 
     // Tabs switched off in Settings > Report tabs are dropped everywhere
-    // (emailed reports and dashboard exports). "About" always stays.
-    $off = array_filter(explode(',', (string) beacon_settings()['report_tabs_off']));
-    if ($off) {
-        $sections = array_values(array_filter($sections,
-            static fn($s) => ($s['key'] ?? '') === 'about' || !in_array($s['key'] ?? '', $off, true)));
+    // (emailed reports and dashboard exports). "About" always stays. Runs
+    // before AND after combining, so older saved choices still apply.
+    $off  = array_filter(explode(',', (string) beacon_settings()['report_tabs_off']));
+    $keep = static fn($s) => ($s['key'] ?? '') === 'about' || !in_array($s['key'] ?? '', $off, true);
+    $sections = array_values(array_filter($sections, $keep));
+    $sections = beacon_report_consolidate($sections);
+    return array_values(array_filter($sections, $keep));
+}
+
+/**
+ * Fewer, fuller tabs. Small related tables are stacked on one tab, and
+ * tables that repeat another tab are dropped:
+ *  - Overview = About + Totals + Performance
+ *  - "Pageviews by day" is dropped when "Pageviews by entry link" exists
+ *    (its Total views column is the same numbers)
+ *  - Technology = Devices + Browsers + Operating systems + Screen sizes
+ *  - Locations = Countries + US states
+ *  - Events = Event totals + Event details
+ *  - Service lines compare = the five side-by-side service line tables;
+ *    site-wide "Survey responses" is dropped when it exists (its All
+ *    column has the same answers, counted by visit)
+ *  - Funnels = every funnel on one tab
+ */
+function beacon_report_consolidate(array $sections): array
+{
+    $has = static fn(string $k) => (bool) array_filter($sections, static fn($s) => ($s['key'] ?? '') === $k);
+    if ($has('entry_links')) {
+        $sections = array_values(array_filter($sections, static fn($s) => ($s['key'] ?? '') !== 'series'));
+    }
+    if ($has('sl_summary')) {
+        $sections = array_values(array_filter($sections, static fn($s) => ($s['key'] ?? '') !== 'survey'));
+    }
+    $groups = [
+        'about'      => [['about', 'totals', 'performance'], __('Overview', 'beacon-analytics')],
+        'technology' => [['devices', 'browsers', 'oses', 'screens'], __('Technology', 'beacon-analytics')],
+        'locations'  => [['countries', 'regions'], __('Locations', 'beacon-analytics')],
+        'events'     => [['event_totals', 'event_details'], __('Events', 'beacon-analytics')],
+        'sl_compare' => [['sl_summary', 'sl_pages', 'sl_time', 'sl_clicks', 'sl_answers'], __('Service lines compare', 'beacon-analytics')],
+        'funnels'    => [['funnels'], __('Funnels', 'beacon-analytics')],
+    ];
+    foreach ($groups as $newkey => [$members, $title]) {
+        $out = [];
+        $at  = null;
+        $blocks = [];
+        foreach ($sections as $s) {
+            if (in_array($s['key'] ?? '', $members, true) && empty($s['blocks'])) {
+                if ($at === null) {
+                    $at = count($out);
+                    $out[] = null; // placeholder keeps the tab where the first member was
+                }
+                $blocks[] = ['title' => (string) $s['title'], 'headers' => $s['headers'], 'rows' => $s['rows']];
+                continue;
+            }
+            $out[] = $s;
+        }
+        if ($at !== null) {
+            $out[$at] = ['key' => $newkey, 'title' => $title, 'headers' => [], 'rows' => [], 'blocks' => $blocks];
+        }
+        $sections = $out;
     }
     return $sections;
+}
+
+/**
+ * For CSV and PDF: turn stacked-block tabs back into plain tables, and
+ * leave out the Excel-only per-service-line tabs.
+ */
+function beacon_report_flatten(array $sections): array
+{
+    $flat = [];
+    foreach ($sections as $s) {
+        if (!empty($s['xlsx_only'])) {
+            continue;
+        }
+        if (!empty($s['blocks'])) {
+            foreach ($s['blocks'] as $b) {
+                $flat[] = ['key' => $s['key'] ?? '', 'title' => (string) $b['title'], 'headers' => $b['headers'], 'rows' => $b['rows']];
+            }
+            continue;
+        }
+        $flat[] = $s;
+    }
+    return $flat;
 }
 
 /** Every report tab that can be switched off: key => label. */
 function beacon_report_tab_choices(): array
 {
     return [
-        'totals'            => __('Totals', 'beacon-analytics'),
-        'series'            => __('Pageviews by day', 'beacon-analytics'),
+        'series'            => __('Pageviews by day (only when there are no entry links)', 'beacon-analytics'),
         'entry_links'       => __('Pageviews by entry link', 'beacon-analytics'),
         'top_pages'         => __('Top pages', 'beacon-analytics'),
         'entries'           => __('Entry pages', 'beacon-analytics'),
         'exits'             => __('Exit pages', 'beacon-analytics'),
         'referrers'         => __('Referrers', 'beacon-analytics'),
-        'devices'           => __('Devices', 'beacon-analytics'),
-        'browsers'          => __('Browsers', 'beacon-analytics'),
-        'oses'              => __('Operating systems', 'beacon-analytics'),
-        'screens'           => __('Screen sizes', 'beacon-analytics'),
+        'technology'        => __('Technology (devices, browsers, OS, screens)', 'beacon-analytics'),
         'exit_urls'         => __('Exit URLs (outbound clicks)', 'beacon-analytics'),
-        'countries'         => __('Countries', 'beacon-analytics'),
-        'regions'           => __('US states', 'beacon-analytics'),
-        'performance'       => __('Performance', 'beacon-analytics'),
-        'survey'            => __('Survey responses', 'beacon-analytics'),
+        'locations'         => __('Locations (countries, US states)', 'beacon-analytics'),
+        'survey'            => __('Survey responses (only when there are no service lines)', 'beacon-analytics'),
         'survey_completion' => __('Survey completion', 'beacon-analytics'),
-        'event_totals'      => __('Event totals', 'beacon-analytics'),
-        'event_details'     => __('Event details', 'beacon-analytics'),
-        'sl_summary'        => __('Service lines: summary', 'beacon-analytics'),
-        'sl_pages'          => __('Service lines: pages', 'beacon-analytics'),
-        'sl_time'           => __('Service lines: time on page', 'beacon-analytics'),
-        'sl_clicks'         => __('Service lines: clicks', 'beacon-analytics'),
-        'sl_answers'        => __('Service lines: survey answers', 'beacon-analytics'),
+        'events'            => __('Events (totals and details)', 'beacon-analytics'),
+        'sl_compare'        => __('Service lines compare', 'beacon-analytics'),
         'sl_sheets'         => __('One tab per service line (Excel only)', 'beacon-analytics'),
         'funnels'           => __('Funnels', 'beacon-analytics'),
         'scan_counts'       => __('Site scan: findings by severity', 'beacon-analytics'),
@@ -474,7 +542,13 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
         $rows[] = $row;
     }
     $out[] = ['key' => 'journey_sessions',
-        'title' => sprintf(/* translators: %d: count */ __('Journeys: sessions (%d most recent)', 'beacon-analytics'), count($rows)),
+        // Fixed tab name, so Excel formulas and pivots that point at this
+        // tab keep working from one export to the next. The visit count is
+        // on the Overview tab ('note' below).
+        'title' => __('Journeys: sessions', 'beacon-analytics'),
+        'note'  => count($rows) >= $max_sessions
+            ? sprintf(/* translators: %d: count */ __('Most recent %s visits (the limit)', 'beacon-analytics'), number_format_i18n(count($rows)))
+            : sprintf(/* translators: %d: count */ __('All %s visits in this period', 'beacon-analytics'), number_format_i18n(count($rows))),
         'headers' => $head, 'rows' => $rows];
 
     // Step-by-step detail, tagged with each visit's service line.
@@ -543,7 +617,7 @@ function beacon_report_journey_sections(string $range, bool $deep = false): arra
             $what];
     }
     $out[] = ['key' => 'journey_steps',
-        'title' => sprintf(/* translators: %d: count */ __('Journeys: steps (%d visits)', 'beacon-analytics'), count($n)),
+        'title' => __('Journeys: steps', 'beacon-analytics'),
         'headers' => $deep
             ? [__('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('Visitor', 'beacon-analytics'), __('#', 'beacon-analytics'),
                 __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'), __('Page', 'beacon-analytics'),
@@ -580,10 +654,7 @@ function beacon_report_write_csv(array $sections, string $path): bool
         return false;
     }
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
-    foreach ($sections as $s) {
-        if (!empty($s['xlsx_only'])) {
-            continue; // per-line tabs are an Excel feature
-        }
+    foreach (beacon_report_flatten($sections) as $s) {
         fputcsv($out, [beacon_report_csv_cell((string) $s['title'])], ',', '"', '');
         if ($s['headers']) {
             fputcsv($out, array_map('beacon_report_csv_cell', array_map('strval', $s['headers'])), ',', '"', '');
@@ -770,10 +841,7 @@ function beacon_report_write_pdf(array $sections, string $path, string $title): 
     // A Letter page fits about 8 columns. Wider tables (one column per
     // service line) are split into parts that repeat the first column.
     $split = [];
-    foreach ($sections as $s) {
-        if (!empty($s['xlsx_only'])) {
-            continue; // per-line tabs are an Excel feature
-        }
+    foreach (beacon_report_flatten($sections) as $s) {
         $n = count($s['headers']);
         if ($n <= 8) {
             $split[] = $s;
@@ -946,7 +1014,7 @@ function beacon_send_report(int $days, string $reason): bool
     // Short summary for the email body; the attachment has everything.
     $host   = wp_parse_url(home_url(), PHP_URL_HOST) ?: home_url();
     $tot    = ['pageviews' => null, 'visitors' => null, 'sessions' => null];
-    foreach ($sections as $s) {
+    foreach (beacon_report_flatten($sections) as $s) {
         if (count($s['headers']) === 3 && count($s['rows']) === 1 && is_int($s['rows'][0][0] ?? null)) {
             [$tot['pageviews'], $tot['visitors'], $tot['sessions']] = $s['rows'][0];
             break;
