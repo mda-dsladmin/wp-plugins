@@ -62,10 +62,10 @@ function beacon_export_range(): string
  * CSV, the Excel file, and the email attachment always match. Site scan is
  * left out on purpose (it has its own export on the Site Scan screen).
  */
-function beacon_export_sections(string $range): array
+function beacon_export_sections(string $range, bool $deep = true): array
 {
     require_once BEACON_DIR . 'includes/reports.php';
-    return beacon_report_sections($range, ['analytics', 'funnels', 'journeys']);
+    return beacon_report_sections($range, ['analytics', 'funnels', 'journeys'], $deep);
 }
 
 add_action('admin_post_beacon_export_csv', function (): void {

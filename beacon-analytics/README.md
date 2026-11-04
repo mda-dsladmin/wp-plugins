@@ -271,9 +271,46 @@ what they clicked, and how they answered. Reports add five tabs with the
 same numbers for every service line at once: summary, pages, average time
 on page, clicks, and survey answers. Counts are visits, so repeat clicks
 in one visit count once. Visits with no entry link are shown as
-"(no entry link)" for comparison. Nothing new is collected; these tables
+"organic" for comparison. Nothing new is collected; these tables
 are built from data Beacon already stores.
 
 Other changes: Excel tabs keep their header row frozen while scrolling;
 PDF tables wider than 8 columns are split into parts; Settings > Report
 tabs chooses which tabs appear in emailed reports and dashboard exports.
+
+## Journeys by service line (v1.22.0)
+
+- Excel and CSV exports now include every visit in the range (up to
+  5,000) and all of their steps, with a Service line column on both
+  Journeys tabs, so journeys can be filtered and aggregated by service line
+  in the spreadsheet. PDF and PDF email reports keep the short version
+  (200 visits, steps for the latest 50).
+- Arriving on a different entry link (for example /?sl=gyn after
+  /?sl=brst) now starts a new visit, the same rule Google Analytics uses
+  for a new campaign.
+- Service Lines screen: "View the <line> journeys" opens Journeys filtered
+  to that service line. The Journeys "Entry query contains" filter treats
+  key=value (sl=breast) as an exact match, so it no longer also matches
+  sl=undiagnosed-breast.
+
+## Spreadsheet hooks (v1.23.0)
+
+- Visits that did not arrive on a service line link are labeled "organic".
+- Excel/CSV "Journeys: steps" has one fact per column for filtering and
+  pivot tables: Session, Service line, #, Time, Type, Page, Event, Label,
+  Question, Answer, On page (s). PDFs keep the compact layout.
+- Excel tabs open at 130% zoom with filter buttons on the header row.
+- Scroll-depth and time-on-page milestones (tags using the scroll or timer
+  trigger) are left out of the service-line click tables on screen and in
+  reports. They still appear in journeys and Event totals.
+
+## One Excel tab per service line (v1.24.0)
+
+Excel exports and emailed Excel reports add a tab for each service line
+("SL brst", "SL gyn", ... "SL organic"). Each tab stacks that line's
+numbers: summary (visits, avg visit, avg pages, % phone, % answered),
+pages reached with % of the line's visits and avg time on page, clicks,
+survey answers, and the line's journey steps in the same columns as the
+main Journeys tab. CSV and PDF leave these out (a CSV has one sheet; a PDF
+would get very long). Turn them off in Settings > Report tabs ("One tab per
+service line").

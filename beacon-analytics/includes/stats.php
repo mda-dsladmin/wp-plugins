@@ -252,7 +252,13 @@ function beacon_entry_filter_sql(string $entry, string $query): array
         $params[] = $wpdb->esc_like($entry) . '%';
     }
     $query = ltrim($query, '?');
-    if ($query !== '') {
+    if ($query !== '' && str_contains($query, '=')) {
+        // "sl=breast" matches that exact pair, so it does not also catch
+        // "sl=undiagnosed-breast" or "sl=breast-recon".
+        $q        = $wpdb->esc_like($query);
+        $sql     .= ' AND (fe.path LIKE %s OR fe.path LIKE %s OR fe.path LIKE %s OR fe.path LIKE %s)';
+        array_push($params, '%?' . $q, '%?' . $q . '&%', '%&' . $q, '%&' . $q . '&%');
+    } elseif ($query !== '') {
         $sql     .= ' AND fe.path LIKE %s';
         $params[] = '%' . $wpdb->esc_like('?') . '%' . $wpdb->esc_like($query) . '%';
     }
@@ -457,10 +463,10 @@ function beacon_eval_funnels(array $funnels, string $range): array
  *
  * @param string[] $session_ids
  */
-function beacon_get_steps_for_sessions(array $session_ids): array
+function beacon_get_steps_for_sessions(array $session_ids, int $max_sessions = 100, int $max_steps = 5000): array
 {
     global $wpdb;
-    $ids = array_values(array_filter(array_slice($session_ids, 0, 100),
+    $ids = array_values(array_filter(array_slice($session_ids, 0, max(1, min(5000, $max_sessions))),
         static fn($s) => is_string($s) && preg_match('/^[a-f0-9]{32}$/', $s)));
     if (!$ids) {
         return [];
@@ -470,7 +476,7 @@ function beacon_get_steps_for_sessions(array $session_ids): array
         "SELECT session_id, event_type, event_name, event_label, path, created_at
          FROM " . beacon_table() . "
          WHERE session_id IN ({$ph})
-         ORDER BY session_id, id LIMIT 5000", // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
+         ORDER BY session_id, id LIMIT " . (int) max(1, min(100000, $max_steps)), // phpcs:ignore WordPress.DB.PreparedSQL.InterpolatedNotPrepared
         ...$ids
     ), ARRAY_A);
 }
@@ -657,10 +663,35 @@ function beacon_get_survey_completion(string $range): array
     return $out;
 }
 
+/** Label for visits that did not arrive on a service line link. */
+function beacon_organic_label(): string
+{
+    return __('organic', 'beacon-analytics');
+}
+
+/**
+ * A visit's service line, from its entry page: "/?sl=brst" -> "brst".
+ * A single key=value query shows just the value; anything else shows the
+ * whole query; no query -> "organic".
+ */
+function beacon_service_line_label(string $entry): string
+{
+    $q = (string) parse_url($entry, PHP_URL_QUERY);
+    if ($q === '') {
+        return beacon_organic_label();
+    }
+    parse_str($q, $parts);
+    if (count($parts) === 1) {
+        $v = (string) reset($parts);
+        return $v !== '' ? $v : $q;
+    }
+    return $q;
+}
+
 /**
  * Service-line breakdowns. A "service line" is the entry link a visit
  * arrived on (an entry page with an allow-listed query, like /?sl=brst).
- * Visits with no entry query are grouped as "(no entry link)" for
+ * Visits with no entry query are grouped as "organic" for
  * comparison. Everything is computed from one bounded pull of the range's
  * events, so all four tables agree with each other.
  *
@@ -693,19 +724,20 @@ function beacon_get_service_line_data(string $range, int $max_groups = 20, int $
         $cap
     ), ARRAY_A);
 
-    $none = __('(no entry link)', 'beacon-analytics');
-    $label_for = static function (string $entry) use ($none): string {
-        $q = (string) parse_url($entry, PHP_URL_QUERY);
-        if ($q === '') {
-            return $none;
+    $none      = beacon_organic_label();
+    $label_for = 'beacon_service_line_label';
+    // "Clicks" means clicks: scroll-depth and time-on-page milestones (tags
+    // with the scroll or timer trigger, like scroll_50 or engaged_30s) are
+    // left out here. They still count in Event totals and in journeys.
+    $not_clicks = [];
+    if (function_exists('beacon_parse_tags')) {
+        foreach (beacon_parse_tags((string) beacon_settings()['tags']) as $rule) {
+            if (in_array($rule['trigger'], ['scroll', 'timer'], true)) {
+                $not_clicks[$rule['event']] = true;
+            }
         }
-        parse_str($q, $parts);
-        if (count($parts) === 1) {
-            $v = (string) reset($parts);
-            return $v !== '' ? $v : $q;
-        }
-        return $q;
-    };
+    }
+    $queries   = []; // group => the entry query it came from (for Journeys links)
 
     // Walk visits in order.
     $visits = []; // sid => [group, device, start, end, pages, answered, pageset, clickset, answerset, times]
@@ -714,8 +746,12 @@ function beacon_get_service_line_data(string $range, int $max_groups = 20, int $
         $sid = (string) $r['session_id'];
         $ts  = strtotime((string) $r['created_at'] . ' UTC');
         if (!isset($visits[$sid])) {
+            $grp = $label_for((string) $r['entry']);
+            if ($grp !== $none && !isset($queries[$grp])) {
+                $queries[$grp] = (string) parse_url((string) $r['entry'], PHP_URL_QUERY);
+            }
             $visits[$sid] = [
-                'group' => $label_for((string) $r['entry']), 'device' => (string) $r['device'],
+                'group' => $grp, 'device' => (string) $r['device'],
                 'start' => $ts, 'end' => $ts, 'pages' => 0, 'answered' => false,
                 'pageset' => [], 'clickset' => [], 'answerset' => [], 'times' => [],
             ];
@@ -735,7 +771,7 @@ function beacon_get_service_line_data(string $range, int $max_groups = 20, int $
             if ((string) $r['event_label'] !== '') {
                 $v['answerset'][(string) $r['event_label']] = true;
             }
-        } elseif ($r['event_name'] !== 'study_code') {
+        } elseif ($r['event_name'] !== 'study_code' && !isset($not_clicks[(string) $r['event_name']])) {
             $key = (string) $r['event_name'];
             if ((string) $r['event_label'] !== '') {
                 $key .= ' — ' . $r['event_label'];
@@ -838,6 +874,7 @@ function beacon_get_service_line_data(string $range, int $max_groups = 20, int $
         'time'    => $avg,           // [path][group|'__all'] => avg seconds
         'clicks'  => $pivot($clicks),
         'answers' => $pivot($answers),
+        'queries' => $queries,
         'sampled' => count($rows) >= $cap,
     ];
 }

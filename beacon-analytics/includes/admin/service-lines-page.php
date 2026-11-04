@@ -66,7 +66,7 @@ function beacon_render_service_lines(): void
         <?php endforeach; ?>
       </nav>
 
-      <?php if (count($groups) === 0 || (count($groups) === 1 && $groups[0] === __('(no entry link)', 'beacon-analytics'))) : ?>
+      <?php if (count($groups) === 0 || (count($groups) === 1 && $groups[0] === beacon_organic_label())) : ?>
         <section class="beacon-card">
           <p class="beacon-muted"><?php esc_html_e('No visits in this range arrived on an entry link. Entry links are pages with an allowed query key (Settings > Privacy & data > Query keys to keep), like /?sl=brst.', 'beacon-analytics'); ?></p>
         </section>
@@ -110,6 +110,15 @@ function beacon_render_service_lines(): void
              <?php echo $on ? 'aria-current="page"' : ''; ?>><?php echo esc_html($g); ?></a>
         <?php endforeach; ?>
       </nav>
+
+      <?php if (isset($d['queries'][$pick])) : ?>
+        <p>
+          <a class="beacon-btn" href="<?php echo esc_url(add_query_arg(['page' => 'beacon-journeys', 'range' => in_array($range, ['1d', '7d', '30d', 'all'], true) ? $range : 'all', 'eq' => $d['queries'][$pick]], admin_url('admin.php'))); ?>">
+            <span class="dashicons dashicons-randomize" aria-hidden="true"></span>
+            <?php echo esc_html(sprintf(/* translators: %s: service line */ __('View the %s journeys', 'beacon-analytics'), $pick)); ?>
+          </a>
+        </p>
+      <?php endif; ?>
 
       <?php
       $tables = [

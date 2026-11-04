@@ -100,7 +100,8 @@ function beacon_store_event(array $in): void
     if (!$dnt) {
         $ip           = beacon_client_ip();
         $visitor_hash = beacon_visitor_day_hash($ip, $ua);
-        $session_id   = beacon_stitch_session($visitor_hash, (string) ($in['sid'] ?? ''));
+        $session_id   = beacon_stitch_session($visitor_hash, (string) ($in['sid'] ?? ''),
+            $type === 'pageview' ? beacon_clean_path((string) ($in['url'] ?? '/')) : '');
         // Local file lookup, country + state ONLY (Safe Harbor posture).
         [$country, $region] = beacon_geo_lookup($ip);
         unset($ip); // explicit: the IP is never written
@@ -224,7 +225,7 @@ function beacon_collect_pixel(WP_REST_Request $req)
  * within 30 minutes of the visitor's previous hit reuses it. The visitor
  * hash rotates at local midnight, so a visit also ends at midnight.
  */
-function beacon_stitch_session(string $visitor_hash, string $sid): string
+function beacon_stitch_session(string $visitor_hash, string $sid, string $path = ''): string
 {
     global $wpdb;
     $last = $wpdb->get_row($wpdb->prepare(
@@ -235,6 +236,20 @@ function beacon_stitch_session(string $visitor_hash, string $sid): string
     ), ARRAY_A);
     $window = (int) apply_filters('beacon_session_timeout', 30 * MINUTE_IN_SECONDS);
     if ($last && strtotime((string) $last['created_at'] . ' UTC') >= time() - $window) {
+        // Arriving on a DIFFERENT entry link (like /?sl=gyn after /?sl=brst)
+        // starts a new visit, the same rule Google Analytics uses for a new
+        // campaign. Otherwise one person testing two links within 30 minutes
+        // would show as a single visit credited to the first link.
+        $q = (string) parse_url($path, PHP_URL_QUERY);
+        if ($q !== '') {
+            $entry = (string) $wpdb->get_var($wpdb->prepare(
+                'SELECT path FROM ' . beacon_table() . ' WHERE session_id = %s ORDER BY id ASC LIMIT 1',
+                (string) $last['session_id']
+            ));
+            if ((string) parse_url($entry, PHP_URL_QUERY) !== $q) {
+                return substr(hash('sha256', $sid . $visitor_hash . microtime(true)), 0, 32);
+            }
+        }
         return (string) $last['session_id'];
     }
     return substr(hash('sha256', $sid . $visitor_hash . microtime(true)), 0, 32);

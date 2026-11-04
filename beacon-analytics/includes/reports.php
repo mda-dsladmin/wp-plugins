@@ -74,7 +74,7 @@ function beacon_report_recipients(): array
  * CSV, XLSX, and PDF writers all consume:
  *   [ ['title' => ..., 'headers' => [...], 'rows' => [[...], ...]], ... ]
  */
-function beacon_report_sections(string $range, array $content): array
+function beacon_report_sections(string $range, array $content, bool $deep = false): array
 {
     global $wpdb;
     // stats.php normally loads only in wp-admin; cron runs outside it.
@@ -217,9 +217,18 @@ function beacon_report_sections(string $range, array $content): array
         }
     }
 
+    $journeys = [];
     if (in_array('journeys', $content, true)) {
-        foreach (beacon_report_journey_sections($range) as $js) {
+        $journeys = beacon_report_journey_sections($range, $deep);
+        foreach ($journeys as $js) {
             $sections[] = $js;
+        }
+    }
+
+    // One Excel tab per service line (Excel only: CSV and PDF skip these).
+    if ($deep && in_array('analytics', $content, true)) {
+        foreach (beacon_report_service_line_sheets($range, $journeys) as $sheet) {
+            $sections[] = $sheet;
         }
     }
 
@@ -261,12 +270,103 @@ function beacon_report_tab_choices(): array
         'sl_time'           => __('Service lines: time on page', 'beacon-analytics'),
         'sl_clicks'         => __('Service lines: clicks', 'beacon-analytics'),
         'sl_answers'        => __('Service lines: survey answers', 'beacon-analytics'),
+        'sl_sheets'         => __('One tab per service line (Excel only)', 'beacon-analytics'),
         'funnels'           => __('Funnels', 'beacon-analytics'),
         'scan_counts'       => __('Site scan: findings by severity', 'beacon-analytics'),
         'scan_findings'     => __('Site scan: open findings', 'beacon-analytics'),
         'journey_sessions'  => __('Journeys: sessions', 'beacon-analytics'),
         'journey_steps'     => __('Journeys: steps', 'beacon-analytics'),
     ];
+}
+
+/**
+ * One Excel tab per service line ("SL brst", "SL gyn", ..., "SL organic"),
+ * each holding that line's numbers in stacked blocks: summary, pages
+ * reached (with % of the line's visits and avg time on page), clicks,
+ * survey answers, then the line's journey steps in the same pivot-ready
+ * columns as the main Journeys tab. Excel only ('xlsx_only').
+ *
+ * @param array $journeys Already-built journey sections, reused for steps.
+ */
+function beacon_report_service_line_sheets(string $range, array $journeys = []): array
+{
+    $d = beacon_get_service_line_data($range);
+    if (!array_filter($d['groups'], static fn($g) => $g !== beacon_organic_label())) {
+        return []; // no service line visits: nothing to split
+    }
+    $sum = [];
+    foreach ($d['summary'] as $s) {
+        $sum[$s['group']] = $s;
+    }
+    $steps = null;
+    foreach ($journeys as $js) {
+        if (($js['key'] ?? '') === 'journey_steps') {
+            $steps = $js;
+        }
+    }
+
+    $out = [];
+    foreach ($d['groups'] as $g) {
+        $s      = $sum[$g] ?? null;
+        $visits = max(1, (int) ($s['visits'] ?? 0));
+        $pct    = static fn(int $n): float => round(100 * $n / $visits, 1);
+        $blocks = [];
+
+        $blocks[] = ['title' => sprintf(/* translators: %s: service line */ __('Service line: %s', 'beacon-analytics'), $g),
+            'headers' => [__('Visits', 'beacon-analytics'), __('Avg visit (s)', 'beacon-analytics'),
+                __('Avg pages', 'beacon-analytics'), __('% phone', 'beacon-analytics'), __('% answered survey', 'beacon-analytics')],
+            'rows' => $s ? [[$s['visits'], $s['avg_len'], $s['avg_pages'], $s['mobile'], $s['answered']]] : []];
+
+        $pick = static function (array $items) use ($g): array {
+            $items = array_values(array_filter($items, static fn($it) => ($it['by'][$g] ?? 0) > 0));
+            usort($items, static fn($a, $b) => $b['by'][$g] <=> $a['by'][$g]);
+            return $items;
+        };
+
+        $rows = [];
+        foreach ($pick($d['pages']) as $it) {
+            $rows[] = [$it['label'], $it['by'][$g], $pct($it['by'][$g]), $d['time'][$it['label']][$g] ?? ''];
+        }
+        if ($rows) {
+            $blocks[] = ['title' => __('Pages these visits reached', 'beacon-analytics'),
+                'headers' => [__('Page', 'beacon-analytics'), __('Visits', 'beacon-analytics'),
+                    __('% of visits', 'beacon-analytics'), __('Avg time on page (s)', 'beacon-analytics')],
+                'rows' => $rows];
+        }
+        $rows = [];
+        foreach ($pick($d['clicks']) as $it) {
+            $parts  = explode(' — ', $it['label'], 2);
+            $rows[] = [$parts[0], $parts[1] ?? '', $it['by'][$g], $pct($it['by'][$g])];
+        }
+        if ($rows) {
+            $blocks[] = ['title' => __('What these visits clicked', 'beacon-analytics'),
+                'headers' => [__('Event', 'beacon-analytics'), __('Label', 'beacon-analytics'),
+                    __('Visits', 'beacon-analytics'), __('% of visits', 'beacon-analytics')],
+                'rows' => $rows];
+        }
+        $rows = [];
+        foreach ($pick($d['answers']) as $it) {
+            $qa     = explode(' → ', $it['label'], 2);
+            $rows[] = [trim($qa[0]), trim($qa[1] ?? ''), $it['by'][$g], $pct($it['by'][$g])];
+        }
+        if ($rows) {
+            $blocks[] = ['title' => __('How these visits answered', 'beacon-analytics'),
+                'headers' => [__('Question', 'beacon-analytics'), __('Answer', 'beacon-analytics'),
+                    __('Visits', 'beacon-analytics'), __('% of visits', 'beacon-analytics')],
+                'rows' => $rows];
+        }
+        if ($steps) {
+            $rows = array_values(array_filter($steps['rows'], static fn($row) => ($row[1] ?? '') === $g));
+            if ($rows) {
+                $blocks[] = ['title' => __('Journey steps', 'beacon-analytics'),
+                    'headers' => $steps['headers'], 'rows' => $rows];
+            }
+        }
+
+        $out[] = ['key' => 'sl_sheets', 'title' => 'SL ' . $g, 'headers' => [], 'rows' => [],
+            'blocks' => $blocks, 'xlsx_only' => true];
+    }
+    return $out;
 }
 
 /**
@@ -278,7 +378,7 @@ function beacon_report_tab_choices(): array
 function beacon_report_service_line_sections(string $range): array
 {
     $d = beacon_get_service_line_data($range);
-    $named = array_filter($d['groups'], static fn($g) => $g !== __('(no entry link)', 'beacon-analytics'));
+    $named = array_filter($d['groups'], static fn($g) => $g !== beacon_organic_label());
     if (!$named) {
         return [];
     }
@@ -336,15 +436,20 @@ function beacon_report_service_line_sections(string $range): array
  * anonymous session code so the two tables can be matched up. Bounded so
  * a busy site cannot produce an unreadable file.
  */
-function beacon_report_journey_sections(string $range): array
+function beacon_report_journey_sections(string $range, bool $deep = false): array
 {
     require_once BEACON_DIR . 'includes/stats.php';
 
+    // Deep = spreadsheets (Excel/CSV): every visit in the range up to 5,000,
+    // with all their steps, so the team can filter and aggregate journeys
+    // by service line. Shallow = PDF: recent visits only, to stay readable.
+    $max_sessions = $deep ? 5000 : 200;
+    $max_detail   = $deep ? 5000 : 50;
     $study_on = beacon_settings()['study_field'] !== '';
-    $sessions = beacon_get_sessions($range, '', 1, 200);
+    $sessions = beacon_get_sessions($range, '', 1, $max_sessions);
     $out      = [];
 
-    $head = [__('Started', 'beacon-analytics'), __('Session', 'beacon-analytics')];
+    $head = [__('Started', 'beacon-analytics'), __('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics')];
     if ($study_on) {
         $head[] = __('Study code', 'beacon-analytics');
     }
@@ -355,7 +460,8 @@ function beacon_report_journey_sections(string $range): array
     foreach ($sessions as $s) {
         $row = [
             get_date_from_gmt((string) $s['started'], 'Y-m-d H:i'),
-            substr((string) $s['session_id'], 0, 6),
+            substr((string) $s['session_id'], 0, 8),
+            beacon_service_line_label((string) $s['entry_path']),
         ];
         if ($study_on) {
             $row[] = (string) ($s['study_code'] ?? '');
@@ -366,12 +472,17 @@ function beacon_report_journey_sections(string $range): array
             beacon_split_path((string) $s['entry_path'])[0]);
         $rows[] = $row;
     }
-    $out[] = ['key' => 'journey_sessions', 'title' => __('Journeys: sessions (most recent 200)', 'beacon-analytics'),
+    $out[] = ['key' => 'journey_sessions',
+        'title' => sprintf(/* translators: %d: count */ __('Journeys: sessions (%d most recent)', 'beacon-analytics'), count($rows)),
         'headers' => $head, 'rows' => $rows];
 
-    // Step-by-step detail for the most recent sessions.
-    $ids   = array_column(array_slice($sessions, 0, 50), 'session_id');
-    $steps = beacon_get_steps_for_sessions($ids);
+    // Step-by-step detail, tagged with each visit's service line.
+    $ids   = array_column(array_slice($sessions, 0, $max_detail), 'session_id');
+    $steps = beacon_get_steps_for_sessions($ids, $max_detail, $deep ? 100000 : 5000);
+    $line  = [];
+    foreach ($sessions as $s) {
+        $line[(string) $s['session_id']] = beacon_service_line_label((string) $s['entry_path']);
+    }
 
     // Time on page per pageview: gap to the next pageview IN THE SAME
     // session. The last page of a session has no next, so it stays blank —
@@ -406,16 +517,39 @@ function beacon_report_journey_sections(string $range): array
                 $what .= ' — ' . $st['event_label'];
             }
         }
-        $rows[] = [substr($sid, 0, 6), $n[$sid],
-            get_date_from_gmt((string) $st['created_at'], 'H:i:s'),
+        if ($deep) {
+            // Spreadsheet layout: one fact per column so it can be filtered
+            // and pivoted (e.g. Service line x Label = Embryo freezing).
+            $is_pv   = $st['event_type'] === 'pageview';
+            $is_ans  = (string) $st['event_name'] === 'survey_response';
+            $qa      = $is_ans ? explode(' → ', (string) $st['event_label'], 2) : ['', ''];
+            $rows[] = [substr($sid, 0, 8), $line[$sid] ?? '', $n[$sid],
+                get_date_from_gmt((string) $st['created_at'], 'Y-m-d H:i:s'),
+                $is_pv ? __('page', 'beacon-analytics') : (string) $st['event_type'],
+                (string) $st['path'],
+                $is_pv ? '' : (string) $st['event_name'],
+                ($is_pv || $is_ans) ? '' : (string) ($st['event_label'] ?? ''),
+                trim($qa[0]), trim($qa[1] ?? ''),
+                isset($durs[$i]) ? $durs[$i] : ''];
+            continue;
+        }
+        $rows[] = [substr($sid, 0, 8), $line[$sid] ?? '', $n[$sid],
+            get_date_from_gmt((string) $st['created_at'], 'Y-m-d H:i:s'),
             $st['event_type'] === 'pageview' ? __('page', 'beacon-analytics') : (string) $st['event_type'],
             isset($durs[$i]) ? $durs[$i] : '',
             $what];
     }
-    $out[] = ['key' => 'journey_steps', 'title' => __('Journeys: steps (most recent 50 sessions)', 'beacon-analytics'),
-        'headers' => [__('Session', 'beacon-analytics'), __('#', 'beacon-analytics'),
-            __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'),
-            __('On page (s)', 'beacon-analytics'), __('Step', 'beacon-analytics')],
+    $out[] = ['key' => 'journey_steps',
+        'title' => sprintf(/* translators: %d: count */ __('Journeys: steps (%d visits)', 'beacon-analytics'), count($n)),
+        'headers' => $deep
+            ? [__('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('#', 'beacon-analytics'),
+                __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'), __('Page', 'beacon-analytics'),
+                __('Event', 'beacon-analytics'), __('Label', 'beacon-analytics'),
+                __('Question', 'beacon-analytics'), __('Answer', 'beacon-analytics'),
+                __('On page (s)', 'beacon-analytics')]
+            : [__('Session', 'beacon-analytics'), __('Service line', 'beacon-analytics'), __('#', 'beacon-analytics'),
+                __('Time', 'beacon-analytics'), __('Type', 'beacon-analytics'),
+                __('On page (s)', 'beacon-analytics'), __('Step', 'beacon-analytics')],
         'rows' => $rows];
 
     return $out;
@@ -444,6 +578,9 @@ function beacon_report_write_csv(array $sections, string $path): bool
     }
     fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
     foreach ($sections as $s) {
+        if (!empty($s['xlsx_only'])) {
+            continue; // per-line tabs are an Excel feature
+        }
         fputcsv($out, [beacon_report_csv_cell((string) $s['title'])], ',', '"', '');
         if ($s['headers']) {
             fputcsv($out, array_map('beacon_report_csv_cell', array_map('strval', $s['headers'])), ',', '"', '');
@@ -482,7 +619,21 @@ function beacon_xlsx_esc(string $v): string
 function beacon_xlsx_sheet(array $section): string
 {
     $rows = [];
-    if ($section['headers']) {
+    if (!empty($section['blocks'])) {
+        // Several small tables stacked on one sheet: title, header, rows,
+        // blank line. (No frozen header or filter: there are many headers.)
+        foreach ($section['blocks'] as $b) {
+            $rows[] = ['cells' => [(string) $b['title']], 'style' => 1];
+            if ($b['headers']) {
+                $rows[] = ['cells' => $b['headers'], 'style' => 1];
+            }
+            foreach ($b['rows'] as $br) {
+                $rows[] = ['cells' => array_values($br), 'style' => 0];
+            }
+            $rows[] = ['cells' => [], 'style' => 0];
+        }
+        $section['headers'] = [];
+    } elseif ($section['headers']) {
         $rows[] = ['cells' => $section['headers'], 'style' => 1];
     }
     foreach ($section['rows'] as $r) {
@@ -492,8 +643,12 @@ function beacon_xlsx_sheet(array $section): string
     $xml = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
          . '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
          // Header row stays put while scrolling (View > Freeze top row).
-         . ($section['headers'] ? '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>' : '')
-         . '<cols><col min="1" max="1" width="52" customWidth="1"/><col min="2" max="8" width="20" customWidth="1"/></cols>'
+         // Opens at 130% (the default looked tiny on a projector); header
+         // row frozen while scrolling.
+         . '<sheetViews><sheetView workbookViewId="0" zoomScale="130" zoomScaleNormal="130">'
+         . ($section['headers'] ? '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>' : '')
+         . '</sheetView></sheetViews>'
+         . '<cols><col min="1" max="1" width="52" customWidth="1"/><col min="2" max="12" width="20" customWidth="1"/></cols>'
          . '<sheetData>';
     foreach ($rows as $ri => $row) {
         $xml .= '<row r="' . ($ri + 1) . '">';
@@ -516,7 +671,13 @@ function beacon_xlsx_sheet(array $section): string
         }
         $xml .= '</row>';
     }
-    return $xml . '</sheetData></worksheet>';
+    $xml .= '</sheetData>';
+    // Filter buttons on the header row (Data > Filter), so a tab can be
+    // narrowed to one service line, event, or page in one click.
+    if ($section['headers'] && count($rows) > 1) {
+        $xml .= '<autoFilter ref="A1:' . beacon_xlsx_col(count($section['headers']) - 1) . count($rows) . '"/>';
+    }
+    return $xml . '</worksheet>';
 }
 
 function beacon_report_write_xlsx(array $sections, string $path): bool
@@ -607,6 +768,9 @@ function beacon_report_write_pdf(array $sections, string $path, string $title): 
     // service line) are split into parts that repeat the first column.
     $split = [];
     foreach ($sections as $s) {
+        if (!empty($s['xlsx_only'])) {
+            continue; // per-line tabs are an Excel feature
+        }
         $n = count($s['headers']);
         if ($n <= 8) {
             $split[] = $s;
@@ -752,7 +916,7 @@ function beacon_send_report(int $days, string $reason): bool
     }
 
     $range    = min(365, max(1, $days)) . 'd';
-    $sections = beacon_report_sections($range, $content);
+    $sections = beacon_report_sections($range, $content, (string) $o['report_format'] !== 'pdf');
 
     // Attachment in the chosen format. XLSX needs ZipArchive; fall back to
     // CSV (which Excel opens fine) if the host lacks it.
